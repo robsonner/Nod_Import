@@ -1,0 +1,2 @@
+# Vampire:The Masquerade-Redemption NOD import/export blender add-on 
+This is a blender add-on that main goal is to export 3d models from Vampire:The Masquerade-Redemption game to blender. The VTM:R models come in files .nod extension.
