@@ -39,10 +39,16 @@ class NodFileImport(Operator, ImportHelper):
 
     # List of operator properties, the attributes will be assigned
     # to the class instance from the operator settings before calling.
-    use_setting: BoolProperty(
-        name="Example Boolean",
-        description="Example Tooltip",
-        default=True,
+#    use_setting: BoolProperty(
+#        name="Example Boolean",
+#        description="Example Tooltip",
+#        default=True,
+#    )
+#    
+    use_setting: StringProperty(
+        name="Textures path",
+        description="Path to the folder in which the textures are located",
+        default="C:/GOG Games/Vampire The Masquerade - Redemption/Extracted/Resource/3d/Materials/",
     )
 
     type: EnumProperty(

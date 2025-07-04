@@ -1,3 +1,4 @@
+import os
 import bpy
 import bmesh
 
@@ -13,7 +14,6 @@ def LoadModel(data) -> NodFile:
      nod_file = NodFile(bs) 
      print("We read everything, now position of buffer: ",bs.position," and length: ", bs.length)
      return nod_file
-
 
 def CreateMesh(vertices, faces, edges, meshName):
     new_mesh = bpy.data.meshes.new(meshName)
@@ -82,6 +82,29 @@ def add_bones(obj, mesh, bones, nodVertices):
     bmesh.update_edit_mesh(mesh)
     bpy.ops.object.mode_set(mode='OBJECT')   
 
+def create_material(materialName : str, texturePath: str) -> bpy.types.Material:
+    material = bpy.data.materials.new(name=materialName)
+    material.use_nodes = True  # Enable the use of nodes for this material
+
+    # Get the Principled BSDF node from the material's node tree
+    bsdf_node = material.node_tree.nodes.get('Principled BSDF')
+    if not bsdf_node:
+        raise ValueError("No 'Principled BSDF' node found in the material")
+
+    # Add a texture node to the material
+    texture_node = material.node_tree.nodes.new(type='ShaderNodeTexImage')
+    material.node_tree.links.new(texture_node.outputs['Color'], bsdf_node.inputs['Base Color'])
+
+    # Set the texture file path (you need to specify a valid image file)
+
+    imagePath= texturePath + materialName + '.tga'
+    if os.path.isfile(imagePath):
+        texture_node.image = bpy.data.images.load(filepath= imagePath)
+    else:
+        print(f"The file '{imagePath}' does not exist.")
+        
+    return material
+
 def CreateMeshes(nodFile : NodFile):
     #cursors positions
     vertPosition = 0 
@@ -113,6 +136,7 @@ def CreateMeshes(nodFile : NodFile):
         
         materialName = materialName.rstrip('\x00')
         material = None
+        #TODO: is this needed?
         if len(materials) > 0:
             for m in materials:
                 if m.name == str(materialName):
@@ -120,8 +144,11 @@ def CreateMeshes(nodFile : NodFile):
         
         #material = next(x for x in materials if x.name == materialName)
         
+        #TODO load this from settings
         if material is None: 
-            material = bpy.data.materials.new(materialName)
+            #TODO check if the file actually exists :P
+            material = create_material(materialName, "C:/GOG Games/Vampire The Masquerade - Redemption/Extracted/Resource/3d/Materials/")
+            #material = bpy.data.materials.new(materialName)
             materials.append(material)       
 
         if len(mesh.materials) < 1: #if no materials on the object
@@ -133,30 +160,32 @@ def CreateMeshes(nodFile : NodFile):
         vertices.clear()
         faces.clear()
         edges.clear()
-
-class LoadNodFileOperator(bpy.types.Operator):
-    """Load predefined nod file for testing"""
-    bl_idname = "mesh.load_nod_file"
-    bl_label = "Load Nod File"
-
-    def execute(self, context):
-        in_file = open("F:\GOG Games\Vampire The Masquerade - Redemption\ExtractedModels\christof.nod", "rb") # opening for [r]eading as [b]inary
-        data = in_file.read()
-        in_file.close()
-        nodFile = LoadModel(data) 
-        CreateMeshes(nodFile)
-        #bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False, align='WORLD', location=(0, 0, 0))
-        return {'FINISHED'}
     
-class TestPanel(bpy.types.Panel):
-    """ Displayy panel in 3D view"""
-    bl_label = "Sample Addon"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_options = {'HEADER_LAYOUT_EXPAND'}
+
+#class LoadNodFileOperator(bpy.types.Operator):
+#    """Load predefined nod file for testing"""
+#    bl_idname = "mesh.load_nod_file"
+#    bl_label = "Load Nod File"
+
+#    def execute(self, context):
+#        in_file = open("F:\GOG Games\Vampire The Masquerade - Redemption\ExtractedModels\christof.nod", "rb") # opening for [r]eading as [b]inary
+#        data = in_file.read()
+#        in_file.close()
+#        nodFile = LoadModel(data) 
+#        CreateMeshes(nodFile)
+#        #bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False, align='WORLD', location=(0, 0, 0))
+#        return {'FINISHED'}
     
-    def draw(self, context):
-        layout = self.layout
-        col = layout.column(align=True)
-        col.operator("mesh.load_nod_file", icon="MESH_CUBE")
-        #col.operator("mesh.add_material", icon="SHADING_RENDERED")
+
+#class TestPanel(bpy.types.Panel):
+#    """ Displayy panel in 3D view"""
+#    bl_label = "Sample Addon"
+#    bl_space_type = "VIEW_3D"
+#    bl_region_type = "UI"
+#    bl_options = {'HEADER_LAYOUT_EXPAND'}
+#    
+#    def draw(self, context):
+#        layout = self.layout
+#        col = layout.column(align=True)
+#        col.operator("mesh.load_nod_file", icon="MESH_CUBE")
+#        #col.operator("mesh.add_material", icon="SHADING_RENDERED")

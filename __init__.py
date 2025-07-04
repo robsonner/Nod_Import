@@ -10,12 +10,12 @@ bl_info = {
 import bpy
 
 from .nod_file_import import *
-from .nod_import import TestPanel
-from .nod_import import LoadNodFileOperator
+#from .nod_import import TestPanel
+#from .nod_import import LoadNodFileOperator
 
 classes = {
-    TestPanel,
-    LoadNodFileOperator,
+#    TestPanel,
+#    LoadNodFileOperator,
     NodFileImport
 }
 
