@@ -2,12 +2,17 @@ import os
 import bpy
 import bmesh
 
+from .nod_bone import NodBone
 from .binary_reader import BinaryReader
 from .vector3 import Vector3
 from .vector2 import Vector2
 from .nod_vertex import NodVertex
 from .nod_face import NodFace
 from .nod_file import NodFile
+from bpy.types import ArmatureEditBones
+from mathutils import Vector, Matrix
+from .nod_to_blender_skeleton import *
+
 
 def LoadModel(data) -> NodFile:
      bs = BinaryReader(data, "little") #the files are in little-endian
@@ -21,7 +26,7 @@ def CreateMesh(vertices, faces, edges, meshName):
     new_mesh.update()
     return new_mesh
 
-def add_mesh(name, verts, faces, edges=None, col_name="Collection"):    
+def add_mesh(name, verts, faces, normals,edges=None, col_name="Collection"):    
     if edges is None:
         edges = []
     mesh = bpy.data.meshes.new(name)
@@ -30,6 +35,19 @@ def add_mesh(name, verts, faces, edges=None, col_name="Collection"):
     col.objects.link(obj)
     bpy.context.view_layer.objects.active = obj
     mesh.from_pydata(verts, edges, faces)
+    #added some smoothing
+    mesh.update()
+    mesh.calc_loop_triangles()
+
+    for i, loop in enumerate(mesh.loops):
+        vert_idx = loop.vertex_index
+        if vert_idx < len(normals):
+            loop.normal = normals[vert_idx]
+
+    # Enable smooth shading
+    for face in mesh.polygons:
+        face.use_smooth = True
+    
     return mesh, obj
 
 def add_normals(mesh, normals):
@@ -49,38 +67,6 @@ def add_uv(obj, mesh, uvs, textureName):
 
     bmesh.update_edit_mesh(mesh)
     bpy.ops.object.mode_set(mode='OBJECT')
-        
-        # Create a new UVMap
-    #uv_layer = mesh.uv_layers.new(name="UVMap")
-
-    # Fill in your UVs
-    #uv_layer.data.foreach_set("uv", uv)
-    """
-    uv_layer = mesh.loops.layers.uv.verify()
-    mesh.faces.layers.tex.verify()
-
-    face = mesh.faces[-1]
-    for i, loop in enumerate(face.loops):
-        loop[uv_layer].uv = uv[i]
-    
-    # assign material
-    try:
-        material_names = [ m.name for m in obj.data.materials ]
-        material_id = material_names.index(textureName)
-    except ValueError:
-        obj.data.materials.append(bpy.data.materials[textureName])
-        material_id = len(obj.data.materials) - 1
-
-    face.material_index = material_id
-    """
-
-def add_bones(obj, mesh, bones, nodVertices):
-    bpy.ops.object.mode_set(mode='EDIT')
-    bm = bmesh.from_edit_mesh(mesh)
-    vertices = bm.verts
-
-    bmesh.update_edit_mesh(mesh)
-    bpy.ops.object.mode_set(mode='OBJECT')   
 
 def create_material(materialName : str, texturePath: str) -> bpy.types.Material:
     material = bpy.data.materials.new(name=materialName)
@@ -129,11 +115,9 @@ def CreateMeshes(nodFile : NodFile):
         vertPosition = vertPosition + groupMesh.num_vertices
         facePosition = facePosition + groupMesh.num_faces
 
-        mesh,obj = add_mesh(nodFile.mesh_names[groupMesh.mesh_num],vertices,faces)
+        mesh,obj = add_mesh(nodFile.mesh_names[groupMesh.mesh_num],vertices,faces,normals)
         materialName = nodFile.header.material_names[groupMesh.material_id]
         add_uv(obj,mesh,uv,materialName)
-        add_bones(obj,mesh, nodFile.bones, vertices)
-        
         materialName = materialName.rstrip('\x00')
         material = None
         #TODO: is this needed?
@@ -160,32 +144,6 @@ def CreateMeshes(nodFile : NodFile):
         vertices.clear()
         faces.clear()
         edges.clear()
-    
 
-#class LoadNodFileOperator(bpy.types.Operator):
-#    """Load predefined nod file for testing"""
-#    bl_idname = "mesh.load_nod_file"
-#    bl_label = "Load Nod File"
-
-#    def execute(self, context):
-#        in_file = open("F:\GOG Games\Vampire The Masquerade - Redemption\ExtractedModels\christof.nod", "rb") # opening for [r]eading as [b]inary
-#        data = in_file.read()
-#        in_file.close()
-#        nodFile = LoadModel(data) 
-#        CreateMeshes(nodFile)
-#        #bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False, align='WORLD', location=(0, 0, 0))
-#        return {'FINISHED'}
-    
-
-#class TestPanel(bpy.types.Panel):
-#    """ Displayy panel in 3D view"""
-#    bl_label = "Sample Addon"
-#    bl_space_type = "VIEW_3D"
-#    bl_region_type = "UI"
-#    bl_options = {'HEADER_LAYOUT_EXPAND'}
-#    
-#    def draw(self, context):
-#        layout = self.layout
-#        col = layout.column(align=True)
-#        col.operator("mesh.load_nod_file", icon="MESH_CUBE")
-#        #col.operator("mesh.add_material", icon="SHADING_RENDERED")
+    col = bpy.data.collections["Collection"]
+    create_blender_skeleton_from_nod(nodFile.bones)
