@@ -1,13 +1,14 @@
 import bpy
 from .nod_import import *
+from .import_settings import ImportSettings
 
-def read_data(context, filepath, settings):
+def read_data(context, filepath, settings: ImportSettings):
     in_file = open(filepath, 'rb')
     data = in_file.read()
     in_file.close()
 
     nodFile = LoadModel(data) 
-    CreateMeshes(nodFile)
+    CreateMeshes(nodFile,settings)
     
     return {'FINISHED'}
 
@@ -39,28 +40,28 @@ class NodFileImport(Operator, ImportHelper):
 
     # List of operator properties, the attributes will be assigned
     # to the class instance from the operator settings before calling.
-#    use_setting: BoolProperty(
-#        name="Example Boolean",
-#        description="Example Tooltip",
-#        default=True,
-#    )
-#    
-    use_setting: StringProperty(
+    load_bones: BoolProperty(
+        name="Load Bones",
+        description="Should bones be loaded",
+        default=True,
+    )
+    
+    textures_path: StringProperty(
         name="Textures path",
         description="Path to the folder in which the textures are located",
         default="C:/GOG Games/Vampire The Masquerade - Redemption/Extracted/Resource/3d/Materials/",
     )
 
-    type: EnumProperty(
-        name="Example Enum",
-        description="Choose between two items",
-        items=(
-            ('OPT_A', "First Option", "Description one"),
-            ('OPT_B', "Second Option", "Description two"),
-        ),
-        default='OPT_A',
-    )
+#    type: EnumProperty(
+#        name="Example Enum",
+#        description="Choose between two items",
+#        items=(
+#            ('OPT_A', "First Option", "Description one"),
+#            ('OPT_B', "Second Option", "Description two"),
+#        ),
+#        default='OPT_A',
+#    )
 
     def execute(self, context):
-        return read_data(context, self.filepath, self.use_setting)
+        return read_data(context, self.filepath, ImportSettings(self.load_bones, self.textures_path))
     

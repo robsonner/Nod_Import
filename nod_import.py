@@ -12,7 +12,7 @@ from .nod_file import NodFile
 from bpy.types import ArmatureEditBones
 from mathutils import Vector, Matrix
 from .nod_to_blender_skeleton import *
-
+from .import_settings import ImportSettings
 
 def LoadModel(data) -> NodFile:
      bs = BinaryReader(data, "little") #the files are in little-endian
@@ -91,7 +91,7 @@ def create_material(materialName : str, texturePath: str) -> bpy.types.Material:
         
     return material
 
-def CreateMeshes(nodFile : NodFile):
+def CreateMeshes(nodFile : NodFile, settings: ImportSettings):
     #cursors positions
     vertPosition = 0 
     facePosition = 0
@@ -131,7 +131,7 @@ def CreateMeshes(nodFile : NodFile):
         #TODO load this from settings
         if material is None: 
             #TODO check if the file actually exists :P
-            material = create_material(materialName, "C:/GOG Games/Vampire The Masquerade - Redemption/Extracted/Resource/3d/Materials/")
+            material = create_material(materialName, settings.textures_dir_path)
             #material = bpy.data.materials.new(materialName)
             materials.append(material)       
 
@@ -145,5 +145,5 @@ def CreateMeshes(nodFile : NodFile):
         faces.clear()
         edges.clear()
 
-    col = bpy.data.collections["Collection"]
-    create_blender_skeleton_from_nod(nodFile.bones)
+    if(settings.load_bones):
+        create_blender_skeleton_from_nod(nodFile.bones)
