@@ -1,0 +1,18 @@
+{
+    "editor.tokenColorCustomizations":
+    {
+        "textMateRules": [
+            {
+                "scope":"string.quoted.docstring.multi.python",
+                "settings": {
+                    "foreground": "#69676c" //color for python docstrings
+    
+                }
+            }
+        ]
+    },
+    "workbench.editor.pinnedTabSizing": "normal",
+    "workbench.editor.pinnedTabsOnSeparateRow": true,
+    "workbench.editor.tabSizing": "shrink",
+    "workbench.editor.wrapTabs": true
+}
