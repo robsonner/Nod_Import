@@ -44,6 +44,7 @@ class NodFileImport(Operator, ImportHelper):
         name="Load Bones",
         description="Should bones be loaded",
         default=True,
+
     )
     
     textures_path: StringProperty(
