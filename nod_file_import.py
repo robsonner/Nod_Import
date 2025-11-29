@@ -1,5 +1,5 @@
 import bpy
-from .nod_import import *
+from .nod_to_blender_utils import *
 from .import_settings import ImportSettings
 
 def read_data(context, filepath, settings: ImportSettings):

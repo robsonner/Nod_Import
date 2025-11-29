@@ -15,7 +15,7 @@ This is a blender add-on that main goal is to export 3d models from Vampire:The 
     - textures
 
 # TODO:
- - Exporting of models (possibly never xd)
+ - Exporting of models
  - importing bones
  - importing animations
  - now meshes are loaded and added to collection, they should be added as submodels or smth

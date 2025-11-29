@@ -87,7 +87,7 @@ def create_material(materialName : str, texturePath: str) -> bpy.types.Material:
     if os.path.isfile(imagePath):
         texture_node.image = bpy.data.images.load(filepath= imagePath)
     else:
-        print(f"The file '{imagePath}' does not exist.")
+        print(f"The texture with filepath '{imagePath}' for material '{materialName}' does not exist.")
         
     return material
 
@@ -130,8 +130,8 @@ def CreateMeshes(nodFile : NodFile, settings: ImportSettings):
         
         #TODO load this from settings
         if material is None: 
-            #TODO check if the file actually exists :P
-            material = create_material(materialName, settings.textures_dir_path)
+            settings_2 = ImportSettings.get_instance()
+            material = create_material(materialName, settings_2.textures_dir_path)
             #material = bpy.data.materials.new(materialName)
             materials.append(material)       
 
