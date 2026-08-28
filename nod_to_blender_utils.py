@@ -12,6 +12,7 @@ from .nod_file import NodFile
 from bpy.types import ArmatureEditBones
 from mathutils import Vector, Matrix
 from .nod_to_blender_skeleton import *
+from .test_weights_bones import *
 from .import_settings import ImportSettings
 
 def LoadModel(data) -> NodFile:
@@ -96,7 +97,6 @@ def CreateMeshes(nodFile : NodFile, settings: ImportSettings):
     vertPosition = 0 
     facePosition = 0
     materials =[]
-    #for i in range(nodFile.header.num_meshes):
     for groupMesh in nodFile.mesh_groups:
         vertices = []
         faces = []
@@ -128,11 +128,8 @@ def CreateMeshes(nodFile : NodFile, settings: ImportSettings):
         
         #material = next(x for x in materials if x.name == materialName)
         
-        #TODO load this from settings
         if material is None: 
-            settings_2 = ImportSettings.get_instance()
-            material = create_material(materialName, settings_2.textures_dir_path)
-            #material = bpy.data.materials.new(materialName)
+            material = create_material(materialName, settings.textures_dir_path)
             materials.append(material)       
 
         if len(mesh.materials) < 1: #if no materials on the object
@@ -146,4 +143,6 @@ def CreateMeshes(nodFile : NodFile, settings: ImportSettings):
         edges.clear()
 
     if(settings.load_bones):
-        create_blender_skeleton_from_nod(nodFile.bones)
+        #create_blender_skeleton_from_nod(nodFile.bones)
+        create_blender_skeleton_from_nod_with_mesh(nodFile.vertices,nodFile.bones)
+

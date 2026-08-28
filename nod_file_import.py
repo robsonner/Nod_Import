@@ -44,12 +44,12 @@ class NodFileImport(Operator, ImportHelper):
         name="Load Bones",
         description="Should bones be loaded",
         default=True,
-
     )
-    
+
     textures_path: StringProperty(
         name="Textures path",
         description="Path to the folder in which the textures are located",
+        subtype="DIR_PATH",
         default="C:/GOG Games/Vampire The Masquerade - Redemption/Extracted/Resource/3d/Materials/",
     )
 
