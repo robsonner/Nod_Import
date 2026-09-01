@@ -1,6 +1,8 @@
 import bpy
+import os
 from .nod_to_blender_utils import *
 from .import_settings import ImportSettings
+from .nad_to_blender import import_nad_file
 
 def read_data(context, filepath, settings: ImportSettings):
     in_file = open(filepath, 'rb')
@@ -8,7 +10,19 @@ def read_data(context, filepath, settings: ImportSettings):
     in_file.close()
 
     nodFile = LoadModel(data) 
-    CreateMeshes(nodFile,settings)
+    armature_obj = CreateMeshes(nodFile,settings)
+
+    if settings.load_animation:
+        nad_path = settings.animation_path.strip()
+        if not nad_path:
+            nad_path = os.path.splitext(filepath)[0] + ".nad"
+        nad_path = bpy.path.abspath(nad_path)
+        if not settings.load_bones:
+            print("WARNING: NAD import skipped because Load Bones is disabled")
+        elif os.path.isfile(nad_path):
+            import_nad_file(nad_path, armature_obj)
+        else:
+            print(f"WARNING: NAD animation file not found: '{nad_path}'")
     
     return {'FINISHED'}
 
@@ -46,6 +60,21 @@ class NodFileImport(Operator, ImportHelper):
         default=True,
     )
 
+    load_animation: BoolProperty(
+        name="Load NAD Animation",
+        description="Import a NAD animation onto the imported armature",
+        default=True,
+    )
+
+    animation_path: StringProperty(
+        name="NAD Animation",
+        description=("NAD animation file; leave empty to use a file with the "
+                     "same name and directory as the NOD file"),
+        subtype="FILE_PATH",
+        default=("F:\\GOG Games\\Vampire The Masquerade - Redemption\\"
+                 "ExtractedModels\\Christof_kneel.nad"),
+    )
+
     textures_path: StringProperty(
         name="Textures path",
         description="Path to the folder in which the textures are located",
@@ -64,5 +93,10 @@ class NodFileImport(Operator, ImportHelper):
 #    )
 
     def execute(self, context):
-        return read_data(context, self.filepath, ImportSettings(self.load_bones, self.textures_path))
-    
+        settings = ImportSettings(
+            self.load_bones,
+            self.textures_path,
+            self.load_animation,
+            self.animation_path,
+        )
+        return read_data(context, self.filepath, settings)

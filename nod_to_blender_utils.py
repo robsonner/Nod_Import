@@ -97,6 +97,7 @@ def CreateMeshes(nodFile : NodFile, settings: ImportSettings):
     vertPosition = 0 
     facePosition = 0
     materials =[]
+    weighted_meshes = []
     for groupMesh in nodFile.mesh_groups:
         vertices = []
         faces = []
@@ -116,6 +117,11 @@ def CreateMeshes(nodFile : NodFile, settings: ImportSettings):
         facePosition = facePosition + groupMesh.num_faces
 
         mesh,obj = add_mesh(nodFile.mesh_names[groupMesh.mesh_num],vertices,faces,normals)
+        weighted_meshes.append((
+            obj,
+            nodFile.vertices[vertPosition - groupMesh.num_vertices:vertPosition],
+            groupMesh,
+        ))
         materialName = nodFile.header.material_names[groupMesh.material_id]
         add_uv(obj,mesh,uv,materialName)
         materialName = materialName.rstrip('\x00')
@@ -142,7 +148,20 @@ def CreateMeshes(nodFile : NodFile, settings: ImportSettings):
         faces.clear()
         edges.clear()
 
+    armature_obj = None
     if(settings.load_bones):
         #create_blender_skeleton_from_nod(nodFile.bones)
-        create_blender_skeleton_from_nod_with_mesh(nodFile.vertices,nodFile.bones)
+        armature_obj = create_blender_skeleton_from_nod_with_mesh(
+            nodFile.vertices, nodFile.bones
+        )
+        for mesh_obj, group_vertices, group_mesh in weighted_meshes:
+            attach_nod_mesh_to_armature(
+                mesh_obj,
+                group_vertices,
+                nodFile.bones,
+                armature_obj,
+                group_mesh.group_flags,
+                group_mesh.bone_num,
+            )
+    return armature_obj
 

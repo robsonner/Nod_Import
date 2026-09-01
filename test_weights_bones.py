@@ -2,8 +2,116 @@ import bpy
 from mathutils import Vector, Matrix
 import mathutils
 
+NOD_GROUP_NOWEIGHTS = 0x2
+NOD_GROUP_NOSKINNING = 0x4
+NOD_GROUP_KNOWN_FLAGS = 0xF
+
 def convert_to_mathutils_vector(v):
     return mathutils.Vector((v.x, v.y, v.z))
+
+def attach_nod_mesh_to_armature(mesh_obj, nod_vertices, nod_bones, armature_obj,
+                                group_flags=0, group_bone_num=0):
+    """Create NOD skin weights and an Armature modifier on one mesh group.
+
+    NOD stores at most two influences per vertex. ``bone_number`` is the first
+    bone and, for soft-skinned vertices, the second bone is its parent.
+    ``NOSKINNING`` overrides per-vertex bindings with the mesh-group bone.
+    """
+    if mesh_obj is None or mesh_obj.type != 'MESH':
+        raise ValueError("A Blender mesh object is required")
+
+    bone_count = len(nod_bones)
+    vertex_count = len(mesh_obj.data.vertices)
+    if len(nod_vertices) != vertex_count:
+        raise ValueError(
+            f"NOD vertex count ({len(nod_vertices)}) does not match Blender "
+            f"mesh vertex count ({vertex_count})"
+        )
+
+    vertex_groups = {}
+    assigned_vertices = set()
+
+    # Some shipped NOD files contain the MSVC debug-fill pattern (0xCDCD,
+    # 0xCDCE, 0xCDCF) in GroupFlags. Those values are uninitialised data, not
+    # real flags. In particular, blindly testing bit 0x4 incorrectly makes the
+    # whole mesh rigidly bound to group bone 0.
+    flags_are_valid = (group_flags & ~NOD_GROUP_KNOWN_FLAGS) == 0
+    effective_flags = group_flags if flags_are_valid else 0
+    if not flags_are_valid:
+        print(f"WARNING: mesh '{mesh_obj.name}' has invalid/uninitialised NOD "
+              f"group flags 0x{group_flags:04X}; using per-vertex skinning")
+
+    def add_weight(vertex_index, bone_index, weight):
+        if not (0 <= bone_index < bone_count) or weight <= 0.0:
+            return
+        group = vertex_groups.get(bone_index)
+        if group is None:
+            group = mesh_obj.vertex_groups.get(f"Bone_{bone_index:03d}")
+            if group is None:
+                group = mesh_obj.vertex_groups.new(name=f"Bone_{bone_index:03d}")
+            vertex_groups[bone_index] = group
+        group.add([vertex_index], min(1.0, float(weight)), 'REPLACE')
+        assigned_vertices.add(vertex_index)
+
+    if effective_flags & NOD_GROUP_NOSKINNING:
+        if 0 <= group_bone_num < bone_count:
+            for vertex_index in range(vertex_count):
+                add_weight(vertex_index, group_bone_num, 1.0)
+        else:
+            print(f"WARNING: mesh '{mesh_obj.name}' has invalid group bone "
+                  f"index {group_bone_num}")
+    else:
+        has_soft_weights = not (effective_flags & NOD_GROUP_NOWEIGHTS)
+        for vertex_index, nod_vertex in enumerate(nod_vertices):
+            bone_index = nod_vertex.bone_number
+            if not (0 <= bone_index < bone_count):
+                print(f"WARNING: mesh '{mesh_obj.name}', vertex {vertex_index} "
+                      f"has invalid bone index {bone_index}")
+                continue
+
+            weight = max(0.0, min(1.0, float(nod_vertex.weight)))
+            if not has_soft_weights or weight >= 1.0:
+                add_weight(vertex_index, bone_index, 1.0)
+                continue
+
+            add_weight(vertex_index, bone_index, weight)
+            parent_index = nod_bones[bone_index].parent_id
+            if 0 <= parent_index < bone_count:
+                add_weight(vertex_index, parent_index, 1.0 - weight)
+            else:
+                # A root bone has no parent, so keep the vertex fully bound.
+                add_weight(vertex_index, bone_index, 1.0)
+
+    # A valid deform setup needs both matching vertex groups and an Armature
+    # modifier. Parenting also makes the meshes follow object-level movement of
+    # the armature, just like Blender's "Armature Deform" operation.
+    modifier = mesh_obj.modifiers.get("NOD Armature")
+    if modifier is None or modifier.type != 'ARMATURE':
+        modifier = mesh_obj.modifiers.new(name="NOD Armature", type='ARMATURE')
+    modifier.object = armature_obj
+    modifier.use_vertex_groups = True
+    modifier.show_viewport = True
+    modifier.show_render = True
+
+    world_matrix = mesh_obj.matrix_world.copy()
+    mesh_obj.parent = armature_obj
+    mesh_obj.matrix_world = world_matrix
+
+    for bone in armature_obj.data.bones:
+        bone.use_deform = True
+    armature_obj.data.pose_position = 'POSE'
+
+    mesh_obj.data.update()
+    bpy.context.view_layer.update()
+
+    group_names = ", ".join(
+        f"Bone_{bone_index:03d}" for bone_index in sorted(vertex_groups)
+    ) or "none"
+    print(f"Attached mesh '{mesh_obj.name}' to '{armature_obj.name}': "
+          f"flags=0x{group_flags:04X}, group_bone={group_bone_num}, "
+          f"groups=[{group_names}], weighted "
+          f"{len(assigned_vertices)}/{vertex_count} vertices")
+    return modifier
 
 def create_blender_skeleton_from_nod_with_mesh(nod_vertices, nod_bones, armature_name="NOD_Armature"):
     """
