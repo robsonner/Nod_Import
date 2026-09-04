@@ -9,6 +9,32 @@ NOD_GROUP_KNOWN_FLAGS = 0xF
 def convert_to_mathutils_vector(v):
     return mathutils.Vector((v.x, v.y, v.z))
 
+def get_nod_bone_world_rest_position(nod_bone):
+    """Recover only the world-space position from NOD's inverse bind matrix.
+
+    The 12 serialized floats form a row-vector Matrix43: three inverse
+    rotation rows followed by the inverse translation. For a rigid transform,
+    the forward translation is ``-R_inv * T_inv``. Deliberately do not return
+    or apply its rotation: the existing Blender bone orientation logic must
+    remain unchanged.
+    """
+    matrix_rows = nod_bone.rest_matrix_inverse
+    values = []
+    for row in matrix_rows:
+        values.extend((row.x, row.y, row.z, row.w))
+
+    inverse_rotation = (
+        values[0:3],
+        values[3:6],
+        values[6:9],
+    )
+    inverse_translation = values[9:12]
+    return Vector(tuple(
+        -sum(inverse_translation[column] * inverse_rotation[row][column]
+             for column in range(3))
+        for row in range(3)
+    ))
+
 def attach_nod_mesh_to_armature(mesh_obj, nod_vertices, nod_bones, armature_obj,
                                 group_flags=0, group_bone_num=0):
     """Create NOD skin weights and an Armature modifier on one mesh group.
@@ -113,7 +139,9 @@ def attach_nod_mesh_to_armature(mesh_obj, nod_vertices, nod_bones, armature_obj,
           f"{len(assigned_vertices)}/{vertex_count} vertices")
     return modifier
 
-def create_blender_skeleton_from_nod_with_mesh(nod_vertices, nod_bones, armature_name="NOD_Armature"):
+def create_blender_skeleton_from_nod_with_mesh(
+        nod_vertices, nod_bones, armature_name="NOD_Armature",
+        use_bind_pose_positions=False):
     """
     Convert NOD bone structure to Blender armature.
     
@@ -129,8 +157,11 @@ def create_blender_skeleton_from_nod_with_mesh(nod_vertices, nod_bones, armature
     # Clear existing armatures if any
     bpy.ops.object.select_all(action='DESELECT')
     
-    # FIRST: Calculate bone positions from vertices
-    print(f"=== CALCULATING BONE POSITIONS FROM VERTICES ===")
+    # FIRST: Calculate bone positions. Bind positions provide the actual joint
+    # pivots; the legacy mode retains weighted vertex centroids for comparison.
+    position_mode = ("NOD BIND POSE" if use_bind_pose_positions
+                     else "VERTEX WEIGHT CENTROIDS")
+    print(f"=== CALCULATING BONE POSITIONS: {position_mode} ===")
     bone_positions = {}
     for i in range(len(nod_bones)):
         bone_positions[i] = {"position": mathutils.Vector((0, 0, 0)), "weight": 0}
@@ -156,16 +187,25 @@ def create_blender_skeleton_from_nod_with_mesh(nod_vertices, nod_bones, armature
     # Calculate average positions for each bone
     bone_avg_positions = {}
     for bone_index, data in bone_positions.items():
-        if data["weight"] > 0:
+        if use_bind_pose_positions:
+            bone_avg_positions[bone_index] = get_nod_bone_world_rest_position(
+                nod_bones[bone_index]
+            )
+            print(f"Bone {bone_index}: absolute bind position = "
+                  f"{bone_avg_positions[bone_index]}")
+        elif data["weight"] > 0:
             bone_avg_positions[bone_index] = data["position"] / data["weight"]
             print(f"Bone {bone_index}: avg position from vertices = {bone_avg_positions[bone_index]}")
         else:
-            # Fallback to rest_translate if no vertices assigned
+            # RestTranslate is local to the parent and cannot be used directly
+            # as a Blender edit-bone head. For bones without any influences,
+            # recover only their absolute bind position from RestMatrixInverse.
             nod_bone = nod_bones[bone_index]
-            bone_avg_positions[bone_index] = Vector((nod_bone.rest_translate.x, 
-                                                      nod_bone.rest_translate.y, 
-                                                      nod_bone.rest_translate.z))
-            print(f"Bone {bone_index}: no vertices, using rest_translate = {bone_avg_positions[bone_index]}")
+            bone_avg_positions[bone_index] = get_nod_bone_world_rest_position(
+                nod_bone
+            )
+            print(f"Bone {bone_index}: no vertices, using absolute bind "
+                  f"position = {bone_avg_positions[bone_index]}")
     
     # Create new armature
     armature = bpy.data.armatures.new(armature_name)

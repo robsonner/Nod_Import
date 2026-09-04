@@ -4,6 +4,32 @@ from .nod_to_blender_utils import *
 from .import_settings import ImportSettings
 from .nad_to_blender import import_nad_file
 
+def find_matching_nad_files(nod_path, animation_path=""):
+    """Find <NOD name>_*.nad files without relying on case-sensitive glob."""
+    if animation_path:
+        animation_directory = os.path.dirname(animation_path)
+    else:
+        animation_directory = os.path.dirname(nod_path)
+    if not animation_directory:
+        animation_directory = "."
+
+    nod_name = os.path.splitext(os.path.basename(nod_path))[0]
+    prefix = (nod_name + "_").lower()
+    try:
+        filenames = os.listdir(animation_directory)
+    except OSError as error:
+        print(f"WARNING: cannot scan NAD directory "
+              f"'{animation_directory}': {error}")
+        return []
+
+    matching = [
+        os.path.join(animation_directory, filename)
+        for filename in filenames
+        if filename.lower().startswith(prefix)
+        and filename.lower().endswith(".nad")
+    ]
+    return sorted(matching, key=lambda path: os.path.basename(path).lower())
+
 def read_data(context, filepath, settings: ImportSettings):
     in_file = open(filepath, 'rb')
     data = in_file.read()
@@ -19,8 +45,34 @@ def read_data(context, filepath, settings: ImportSettings):
         nad_path = bpy.path.abspath(nad_path)
         if not settings.load_bones:
             print("WARNING: NAD import skipped because Load Bones is disabled")
+        elif settings.load_all_animations:
+            nad_paths = find_matching_nad_files(filepath, nad_path)
+            if not nad_paths:
+                print(f"WARNING: no matching NAD animations found for "
+                      f"'{filepath}' in '{os.path.dirname(nad_path)}'")
+            else:
+                imported_actions = []
+                preferred_action = None
+                preferred_path = os.path.normcase(os.path.abspath(nad_path))
+                for matching_path in nad_paths:
+                    action = import_nad_file(
+                        matching_path, armature_obj, nodFile.bones
+                    )
+                    imported_actions.append(action)
+                    if os.path.normcase(os.path.abspath(matching_path)) == preferred_path:
+                        preferred_action = action
+
+                active_action = preferred_action or imported_actions[0]
+                armature_obj.animation_data.action = active_action
+                context.scene.frame_start = 1
+                context.scene.frame_end = max(
+                    1, int(round(active_action["nad_duration"])) + 1
+                )
+                context.scene.frame_set(1)
+                print(f"Imported {len(imported_actions)} matching NAD "
+                      f"animations; active action: '{active_action.name}'")
         elif os.path.isfile(nad_path):
-            import_nad_file(nad_path, armature_obj)
+            import_nad_file(nad_path, armature_obj, nodFile.bones)
         else:
             print(f"WARNING: NAD animation file not found: '{nad_path}'")
     
@@ -60,9 +112,23 @@ class NodFileImport(Operator, ImportHelper):
         default=True,
     )
 
+    use_bind_pose_positions: BoolProperty(
+        name="Use NOD Bind Positions",
+        description=("Place bone heads at joint pivots from RestMatrixInverse; "
+                     "disable to use legacy weighted vertex centroids"),
+        default=True,
+    )
+
     load_animation: BoolProperty(
         name="Load NAD Animation",
         description="Import a NAD animation onto the imported armature",
+        default=True,
+    )
+
+    load_all_animations: BoolProperty(
+        name="Load All Matching NAD Animations",
+        description=("Load every <NOD name>_*.nad file from the NAD "
+                     "animation directory as a separate Action"),
         default=True,
     )
 
@@ -98,5 +164,7 @@ class NodFileImport(Operator, ImportHelper):
             self.textures_path,
             self.load_animation,
             self.animation_path,
+            self.load_all_animations,
+            self.use_bind_pose_positions,
         )
         return read_data(context, self.filepath, settings)

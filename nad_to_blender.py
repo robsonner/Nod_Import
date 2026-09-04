@@ -2,7 +2,7 @@ import os
 import math
 
 import bpy
-from mathutils import Euler, Quaternion, Vector
+from mathutils import Euler, Matrix, Quaternion, Vector
 
 from .nad_file import NadFile
 
@@ -42,11 +42,37 @@ def _nad_euler_to_quaternion(value):
                  'XYZ').to_quaternion()
 
 
-def _relative_values(track, pose_bone):
+def _nod_inverse_world_rotation(nod_bone):
+    """Return the rotation part of NOD's serialized inverse Matrix43."""
+    values = []
+    for row in nod_bone.rest_matrix_inverse:
+        values.extend((row.x, row.y, row.z, row.w))
+    return Matrix((values[0:3], values[3:6], values[6:9]))
+
+
+def _nod_local_bind_rotation(nod_bones, bone_index):
+    """Return inverse local bind rotation in the convention used by NAD."""
+    bone = nod_bones[bone_index]
+    child_inverse_world = _nod_inverse_world_rotation(bone)
+    if bone.parent_id < 0:
+        inverse_local = child_inverse_world
+    else:
+        parent_inverse_world = _nod_inverse_world_rotation(
+            nod_bones[bone.parent_id]
+        )
+        # With NOD's row-vector Matrix43 convention:
+        # inverse_local = inverse_child_world * parent_world.
+        inverse_local = child_inverse_world @ parent_inverse_world.transposed()
+    inverse_local.normalize()
+    return inverse_local.to_quaternion()
+
+
+def _relative_values(track, pose_bone, nod_bones):
     """Map absolute NAD channels onto the existing Blender rest pose."""
-    first = track.keys[0].value
     if track.track_type == NAD_TRACK_ROTATION:
-        base_rotation = _nad_euler_to_quaternion(first)
+        base_rotation = _nod_local_bind_rotation(
+            nod_bones, track.bone_num
+        )
         values = []
         previous = None
         for key in track.keys:
@@ -62,18 +88,15 @@ def _relative_values(track, pose_bone):
         return values
     if track.track_type == NAD_TRACK_SCALE:
         return [tuple(
-            value / first[axis] if abs(first[axis]) > 1e-8 else value
+            value
             for axis, value in enumerate(key.value)
         ) for key in track.keys]
     if track.track_type == NAD_TRACK_TRANSLATION:
         rest_axes = pose_bone.bone.matrix_local.to_3x3()
         inverse_rest_axes = rest_axes.inverted_safe()
-        base = Vector(first)
-        return [tuple(inverse_rest_axes @ (Vector(key.value) - base))
+        return [tuple(inverse_rest_axes @ Vector(key.value))
                 for key in track.keys]
-    return [tuple(
-        value - first[axis] for axis, value in enumerate(key.value)
-    ) for key in track.keys]
+    return [tuple(key.value) for key in track.keys]
 
 
 def _set_linear_interpolation(key_points):
@@ -81,11 +104,15 @@ def _set_linear_interpolation(key_points):
         key_point.interpolation = 'LINEAR'
 
 
-def import_nad_animation(nad_file, armature_obj, action_name="NAD_Animation"):
+def import_nad_animation(nad_file, armature_obj, nod_bones,
+                         action_name="NAD_Animation"):
     if armature_obj is None or armature_obj.type != 'ARMATURE':
         raise ValueError("A Blender armature object is required for NAD import")
 
     action = bpy.data.actions.new(name=action_name)
+    # Only one Action can be active on the armature at a time. Preserve the
+    # remaining imported NAD Actions when the .blend file is saved/reopened.
+    action.use_fake_user = True
     armature_obj.animation_data_create()
     armature_obj.animation_data.action = action
     armature_obj.data.pose_position = 'POSE'
@@ -105,7 +132,7 @@ def import_nad_animation(nad_file, armature_obj, action_name="NAD_Animation"):
         if track.track_type == NAD_TRACK_ROTATION:
             pose_bone.rotation_mode = 'QUATERNION'
 
-        values = _relative_values(track, pose_bone)
+        values = _relative_values(track, pose_bone, nod_bones)
         data_path = f'pose.bones["{bone_name}"].{target}'
         channel_count = 4 if track.track_type == NAD_TRACK_ROTATION else 3
         for axis in range(channel_count):
@@ -138,7 +165,8 @@ def import_nad_animation(nad_file, armature_obj, action_name="NAD_Animation"):
     for tag_index, tag in enumerate(nad_file.tags):
         tag_name = NAD_TAG_NAMES.get(tag.tag_type, f"Tag_{tag.tag_type}")
         marker_name = f"NAD_{tag_name}_{tag_index:02d}"
-        scene.timeline_markers.new(marker_name, frame=int(round(tag.frame)) + 1)
+        marker = action.pose_markers.new(marker_name)
+        marker.frame = int(round(tag.frame)) + 1
 
     scene.frame_set(1)
     print(f"Imported NAD action '{action.name}': {imported_tracks}/"
@@ -147,7 +175,9 @@ def import_nad_animation(nad_file, armature_obj, action_name="NAD_Animation"):
     return action
 
 
-def import_nad_file(filepath, armature_obj):
+def import_nad_file(filepath, armature_obj, nod_bones):
     nad_file = load_nad(filepath)
     action_name = os.path.splitext(os.path.basename(filepath))[0]
-    return import_nad_animation(nad_file, armature_obj, action_name)
+    return import_nad_animation(
+        nad_file, armature_obj, nod_bones, action_name
+    )

@@ -152,7 +152,9 @@ def CreateMeshes(nodFile : NodFile, settings: ImportSettings):
     if(settings.load_bones):
         #create_blender_skeleton_from_nod(nodFile.bones)
         armature_obj = create_blender_skeleton_from_nod_with_mesh(
-            nodFile.vertices, nodFile.bones
+            nodFile.vertices,
+            nodFile.bones,
+            use_bind_pose_positions=settings.use_bind_pose_positions,
         )
         for mesh_obj, group_vertices, group_mesh in weighted_meshes:
             attach_nod_mesh_to_armature(
