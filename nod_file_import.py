@@ -3,6 +3,7 @@ import os
 from .nod_to_blender_utils import *
 from .import_settings import ImportSettings
 from .nad_to_blender import import_nad_file
+from .nms_file import find_nms_for_nod, resolve_nms_animations
 
 def find_matching_nad_files(nod_path, animation_path=""):
     """Find <NOD name>_*.nad files without relying on case-sensitive glob."""
@@ -45,8 +46,31 @@ def read_data(context, filepath, settings: ImportSettings):
         nad_path = bpy.path.abspath(nad_path)
         if not settings.load_bones:
             print("WARNING: NAD import skipped because Load Bones is disabled")
-        elif settings.load_all_animations:
-            nad_paths = find_matching_nad_files(filepath, nad_path)
+        elif settings.use_nms or settings.load_all_animations:
+            animation_directory = os.path.dirname(nad_path)
+            requested_nms_text = settings.nms_path.strip()
+            requested_nms_path = (
+                bpy.path.abspath(requested_nms_text)
+                if requested_nms_text else ""
+            )
+            nms_path = None
+            nms_metadata = {}
+            if settings.use_nms:
+                nms_path = find_nms_for_nod(filepath, requested_nms_path)
+
+            if settings.use_nms and nms_path:
+                nad_paths, nms_metadata = resolve_nms_animations(
+                    nms_path, animation_directory
+                )
+                print(f"Using NMS motion set: '{nms_path}'")
+            else:
+                nad_paths = find_matching_nad_files(filepath, nad_path)
+                if settings.use_nms:
+                    expected_path = (requested_nms_path or
+                                     os.path.splitext(filepath)[0] + ".nms")
+                    print(f"WARNING: NMS motion set not found: "
+                          f"'{expected_path}'; using NAD filename-prefix "
+                          "fallback")
             if not nad_paths:
                 print(f"WARNING: no matching NAD animations found for "
                       f"'{filepath}' in '{os.path.dirname(nad_path)}'")
@@ -58,6 +82,20 @@ def read_data(context, filepath, settings: ImportSettings):
                     action = import_nad_file(
                         matching_path, armature_obj, nodFile.bones
                     )
+                    metadata_key = os.path.normcase(
+                        os.path.abspath(matching_path)
+                    )
+                    motion_entries = nms_metadata.get(metadata_key, [])
+                    if motion_entries:
+                        action["nms_source"] = nms_path
+                        action["nms_motion_modes"] = ",".join(
+                            entry.mode for entry in motion_entries
+                        )
+                        action["nms_flags"] = ",".join(sorted({
+                            flag.lower()
+                            for entry in motion_entries
+                            for flag in entry.flags
+                        }))
                     imported_actions.append(action)
                     if os.path.normcase(os.path.abspath(matching_path)) == preferred_path:
                         preferred_action = action
@@ -127,9 +165,25 @@ class NodFileImport(Operator, ImportHelper):
 
     load_all_animations: BoolProperty(
         name="Load All Matching NAD Animations",
-        description=("Load every <NOD name>_*.nad file from the NAD "
-                     "animation directory as a separate Action"),
+        description=("When NMS is disabled or unavailable, load every "
+                     "<NOD name>_*.nad file from the NAD animation "
+                     "directory as a separate Action"),
         default=True,
+    )
+
+    use_nms: BoolProperty(
+        name="Use NMS Motion Set",
+        description=("Use an NMS motion set to select animations; when no "
+                     "path is provided, use <model name>.nms beside the NOD"),
+        default=True,
+    )
+
+    nms_path: StringProperty(
+        name="NMS Motion Set",
+        description=("Optional NMS file override; leave empty to look beside "
+                     "the imported NOD using the same base filename"),
+        subtype="FILE_PATH",
+        default="",
     )
 
     animation_path: StringProperty(
@@ -166,5 +220,7 @@ class NodFileImport(Operator, ImportHelper):
             self.animation_path,
             self.load_all_animations,
             self.use_bind_pose_positions,
+            self.use_nms,
+            self.nms_path,
         )
         return read_data(context, self.filepath, settings)
