@@ -5,6 +5,7 @@ import bpy
 from mathutils import Euler, Matrix, Quaternion, Vector
 
 from .nad_file import NadFile
+from .debug_logging import debug_print
 
 
 NAD_TRACK_ROTATION = 0
@@ -230,10 +231,10 @@ def import_nad_animation(nad_file, armature_obj, nod_bones,
         marker.frame = int(round(tag.frame)) + 1
 
     scene.frame_set(1)
-    print(f"Imported matrix-retargeted NAD action '{action.name}': "
-          f"{len(tracks)}/{nad_file.num_bone_tracks} tracks, "
-          f"{len(frames)} sampled frames, {nad_file.num_tags} tags, "
-          f"duration={nad_file.duration}")
+    debug_print(f"Imported matrix-retargeted NAD action '{action.name}': "
+                f"{len(tracks)}/{nad_file.num_bone_tracks} tracks, "
+                f"{len(frames)} sampled frames, {nad_file.num_tags} tags, "
+                f"duration={nad_file.duration}")
     return action
 
 

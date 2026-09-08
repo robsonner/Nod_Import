@@ -1,6 +1,7 @@
 import bpy
 from mathutils import Vector, Matrix
 import mathutils
+from .debug_logging import debug_print
 
 NOD_GROUP_NOWEIGHTS = 0x2
 NOD_GROUP_NOSKINNING = 0x4
@@ -133,7 +134,7 @@ def attach_nod_mesh_to_armature(mesh_obj, nod_vertices, nod_bones, armature_obj,
     group_names = ", ".join(
         f"Bone_{bone_index:03d}" for bone_index in sorted(vertex_groups)
     ) or "none"
-    print(f"Attached mesh '{mesh_obj.name}' to '{armature_obj.name}': "
+    debug_print(f"Attached mesh '{mesh_obj.name}' to '{armature_obj.name}': "
           f"flags=0x{group_flags:04X}, group_bone={group_bone_num}, "
           f"groups=[{group_names}], weighted "
           f"{len(assigned_vertices)}/{vertex_count} vertices")
@@ -161,7 +162,7 @@ def create_blender_skeleton_from_nod_with_mesh(
     # pivots; the legacy mode retains weighted vertex centroids for comparison.
     position_mode = ("NOD BIND POSE" if use_bind_pose_positions
                      else "VERTEX WEIGHT CENTROIDS")
-    print(f"=== CALCULATING BONE POSITIONS: {position_mode} ===")
+    debug_print(f"=== CALCULATING BONE POSITIONS: {position_mode} ===")
     bone_positions = {}
     for i in range(len(nod_bones)):
         bone_positions[i] = {"position": mathutils.Vector((0, 0, 0)), "weight": 0}
@@ -191,11 +192,11 @@ def create_blender_skeleton_from_nod_with_mesh(
             bone_avg_positions[bone_index] = get_nod_bone_world_rest_position(
                 nod_bones[bone_index]
             )
-            print(f"Bone {bone_index}: absolute bind position = "
+            debug_print(f"Bone {bone_index}: absolute bind position = "
                   f"{bone_avg_positions[bone_index]}")
         elif data["weight"] > 0:
             bone_avg_positions[bone_index] = data["position"] / data["weight"]
-            print(f"Bone {bone_index}: avg position from vertices = {bone_avg_positions[bone_index]}")
+            debug_print(f"Bone {bone_index}: avg position from vertices = {bone_avg_positions[bone_index]}")
         else:
             # RestTranslate is local to the parent and cannot be used directly
             # as a Blender edit-bone head. For bones without any influences,
@@ -204,7 +205,7 @@ def create_blender_skeleton_from_nod_with_mesh(
             bone_avg_positions[bone_index] = get_nod_bone_world_rest_position(
                 nod_bone
             )
-            print(f"Bone {bone_index}: no vertices, using absolute bind "
+            debug_print(f"Bone {bone_index}: no vertices, using absolute bind "
                   f"position = {bone_avg_positions[bone_index]}")
     
     # Create new armature
@@ -222,7 +223,7 @@ def create_blender_skeleton_from_nod_with_mesh(
     bone_dict = {}
     
     # Create all bones using vertex-calculated positions
-    print(f"\n=== CREATING BONES ===")
+    debug_print("\n=== CREATING BONES ===")
     for i, nod_bone in enumerate(nod_bones):
         # Create bone
         bone = armature.edit_bones.new(f"Bone_{i:03d}")
@@ -234,10 +235,10 @@ def create_blender_skeleton_from_nod_with_mesh(
         # Set initial tail (will be corrected later)
         bone.tail = bone.head + Vector((0, 0, 0.1))
         
-        print(f"Created bone {i}: {bone.name} at position {bone.head}")
+        debug_print(f"Created bone {i}: {bone.name} at position {bone.head}")
     
     # Set up parent relationships
-    print(f"\n=== SETTING UP PARENTS ===")
+    debug_print("\n=== SETTING UP PARENTS ===")
     for i, nod_bone in enumerate(nod_bones):
         bone = bone_dict[i]
         
@@ -245,14 +246,14 @@ def create_blender_skeleton_from_nod_with_mesh(
             if nod_bone.parent_id < len(nod_bones):
                 parent_bone = bone_dict[nod_bone.parent_id]
                 bone.parent = parent_bone
-                print(f"Bone {i} -> Parent {nod_bone.parent_id}")
+                debug_print(f"Bone {i} -> Parent {nod_bone.parent_id}")
             else:
                 print(f"ERROR: Bone {i} has invalid parent_id {nod_bone.parent_id}")
         else:
-            print(f"Bone {i} is ROOT bone")
+            debug_print(f"Bone {i} is ROOT bone")
     
     # Fix bone tails based on children
-    print(f"\n=== FIXING BONE TAILS ===")
+    debug_print("\n=== FIXING BONE TAILS ===")
     for i, nod_bone in enumerate(nod_bones):
         bone = bone_dict[i]
         
@@ -271,10 +272,10 @@ def create_blender_skeleton_from_nod_with_mesh(
             direction = first_child.head - bone.head
             if direction.length > 0.001:
                 bone.tail = first_child.head
-                print(f"Bone {i} tail -> first child {all_children[0]} (all children: {all_children})")
+                debug_print(f"Bone {i} tail -> first child {all_children[0]} (all children: {all_children})")
             else:
                 bone.tail = bone.head + Vector((0, 0, 0.1))
-                print(f"Bone {i} and child at same position, using default tail")
+                debug_print(f"Bone {i} and child at same position, using default tail")
         else:
             # No children - use reasonable tail
             if bone.parent:
@@ -286,12 +287,12 @@ def create_blender_skeleton_from_nod_with_mesh(
                     bone.tail = bone.head + Vector((0, 0, 0.1))
             else:
                 bone.tail = bone.head + Vector((0, 0, 0.1))
-            print(f"Bone {i} is leaf bone")
+            debug_print(f"Bone {i} is leaf bone")
 
     # Return to object mode
     bpy.ops.object.mode_set(mode='OBJECT')
     
-    print(f"\n=== ARMATURE CREATED ===")
-    print(f"Armature '{armature_name}' created with {len(nod_bones)} bones")
+    debug_print("\n=== ARMATURE CREATED ===")
+    debug_print(f"Armature '{armature_name}' created with {len(nod_bones)} bones")
     
     return armature_obj

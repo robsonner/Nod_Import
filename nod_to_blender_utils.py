@@ -14,11 +14,13 @@ from mathutils import Vector, Matrix
 from .nod_to_blender_skeleton import *
 from .test_weights_bones import *
 from .import_settings import ImportSettings
+from .debug_logging import debug_print
 
 def LoadModel(data) -> NodFile:
      bs = BinaryReader(data, "little") #the files are in little-endian
      nod_file = NodFile(bs) 
-     print("We read everything, now position of buffer: ",bs.position," and length: ", bs.length)
+     debug_print("We read everything, now position of buffer: ",
+                 bs.position, " and length: ", bs.length)
      return nod_file
 
 def CreateMesh(vertices, faces, edges, meshName):
@@ -88,7 +90,8 @@ def create_material(materialName : str, texturePath: str) -> bpy.types.Material:
     if os.path.isfile(imagePath):
         texture_node.image = bpy.data.images.load(filepath= imagePath)
     else:
-        print(f"The texture with filepath '{imagePath}' for material '{materialName}' does not exist.")
+        debug_print(f"The texture with filepath '{imagePath}' for material "
+                    f"'{materialName}' does not exist.")
         
     return material
 

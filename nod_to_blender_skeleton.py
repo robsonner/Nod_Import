@@ -1,5 +1,6 @@
 import bpy
 from mathutils import Vector, Matrix
+from .debug_logging import debug_print
 
 def create_blender_skeleton_from_nod(nod_bones, armature_name="NOD_Armature"):
     """
@@ -61,13 +62,13 @@ def create_blender_skeleton_from_nod(nod_bones, armature_name="NOD_Armature"):
         return world_pos
     
     # Calculate world positions for all bones
-    print(f"=== CALCULATING WORLD POSITIONS ===")
+    debug_print("=== CALCULATING WORLD POSITIONS ===")
     for i in range(len(nod_bones)):
         world_pos = calculate_world_position(i)
-        print(f"Bone {i}: local=({nod_bones[i].rest_translate.x:6.2f}, {nod_bones[i].rest_translate.y:6.2f}, {nod_bones[i].rest_translate.z:6.2f}) -> world=({world_pos.x:6.2f}, {world_pos.y:6.2f}, {world_pos.z:6.2f})")
+        debug_print(f"Bone {i}: local=({nod_bones[i].rest_translate.x:6.2f}, {nod_bones[i].rest_translate.y:6.2f}, {nod_bones[i].rest_translate.z:6.2f}) -> world=({world_pos.x:6.2f}, {world_pos.y:6.2f}, {world_pos.z:6.2f})")
     
     # Create all bones with world positions
-    print(f"\n=== CREATING BONES ===")
+    debug_print("\n=== CREATING BONES ===")
     for i, nod_bone in enumerate(nod_bones):
         # Create bone
         bone = armature.edit_bones.new(f"Bone_{i:03d}")
@@ -80,10 +81,10 @@ def create_blender_skeleton_from_nod(nod_bones, armature_name="NOD_Armature"):
         # Set initial tail (will be corrected later)
         bone.tail = world_pos + Vector((0, 0, 0.1))
         
-        print(f"Created bone {i}: {bone.name} at world position {world_pos}")
+        debug_print(f"Created bone {i}: {bone.name} at world position {world_pos}")
     
     # Set up parent relationships
-    print(f"\n=== SETTING UP PARENTS ===")
+    debug_print("\n=== SETTING UP PARENTS ===")
     for i, nod_bone in enumerate(nod_bones):
         bone = bone_dict[i]
         
@@ -91,14 +92,14 @@ def create_blender_skeleton_from_nod(nod_bones, armature_name="NOD_Armature"):
             if nod_bone.parent_id < len(nod_bones):
                 parent_bone = bone_dict[nod_bone.parent_id]
                 bone.parent = parent_bone
-                print(f"Bone {i} -> Parent {nod_bone.parent_id}")
+                debug_print(f"Bone {i} -> Parent {nod_bone.parent_id}")
             else:
                 print(f"ERROR: Bone {i} has invalid parent_id {nod_bone.parent_id}")
         else:
-            print(f"Bone {i} is ROOT bone")
+            debug_print(f"Bone {i} is ROOT bone")
     
     # Fix bone tails based on children
-    print(f"\n=== FIXING BONE TAILS ===")
+    debug_print("\n=== FIXING BONE TAILS ===")
     for i, nod_bone in enumerate(nod_bones):
         bone = bone_dict[i]
         
@@ -106,7 +107,7 @@ def create_blender_skeleton_from_nod(nod_bones, armature_name="NOD_Armature"):
         if nod_bone.parent_id == -1:
             # Root bone - use default upward direction
             bone.tail = bone.head + Vector((0, 0, 0.1))
-            print(f"Bone {i} is ROOT bone, using default upward direction")
+            debug_print(f"Bone {i} is ROOT bone, using default upward direction")
             continue
         
         # Collect ALL children by following the sibling chain
@@ -124,10 +125,10 @@ def create_blender_skeleton_from_nod(nod_bones, armature_name="NOD_Armature"):
             direction = first_child.head - bone.head
             if direction.length > 0.001:
                 bone.tail = first_child.head
-                print(f"Bone {i} tail -> first child {all_children[0]} (all children: {all_children})")
+                debug_print(f"Bone {i} tail -> first child {all_children[0]} (all children: {all_children})")
             else:
                 bone.tail = bone.head + Vector((0, 0, 0.1))
-                print(f"Bone {i} and child at same position, using default tail")
+                debug_print(f"Bone {i} and child at same position, using default tail")
         else:
             # No children - use reasonable tail
             if bone.parent:
@@ -139,12 +140,12 @@ def create_blender_skeleton_from_nod(nod_bones, armature_name="NOD_Armature"):
                     bone.tail = bone.head + Vector((0, 0, 0.1))
             else:
                 bone.tail = bone.head + Vector((0, 0, 0.1))
-            print(f"Bone {i} is leaf bone")
+            debug_print(f"Bone {i} is leaf bone")
     
     # Return to object mode
     bpy.ops.object.mode_set(mode='OBJECT')
     
-    print(f"\n=== ARMATURE CREATED ===")
-    print(f"Armature '{armature_name}' created with {len(nod_bones)} bones")
+    debug_print("\n=== ARMATURE CREATED ===")
+    debug_print(f"Armature '{armature_name}' created with {len(nod_bones)} bones")
     
     return armature_obj

@@ -4,6 +4,7 @@ from .nod_to_blender_utils import *
 from .import_settings import ImportSettings
 from .nad_to_blender import import_nad_file
 from .nms_file import find_nms_for_nod, resolve_nms_animations
+from .debug_logging import debug_print, set_debug_logging
 
 def find_matching_nad_files(nod_path, animation_path=""):
     """Find <NOD name>_*.nad files without relying on case-sensitive glob."""
@@ -32,6 +33,8 @@ def find_matching_nad_files(nod_path, animation_path=""):
     return sorted(matching, key=lambda path: os.path.basename(path).lower())
 
 def read_data(context, filepath, settings: ImportSettings):
+    set_debug_logging(settings.debug_log)
+
     in_file = open(filepath, 'rb')
     data = in_file.read()
     in_file.close()
@@ -62,7 +65,7 @@ def read_data(context, filepath, settings: ImportSettings):
                 nad_paths, nms_metadata = resolve_nms_animations(
                     nms_path, animation_directory
                 )
-                print(f"Using NMS motion set: '{nms_path}'")
+                debug_print(f"Using NMS motion set: '{nms_path}'")
             else:
                 nad_paths = find_matching_nad_files(filepath, nad_path)
                 if settings.use_nms:
@@ -107,8 +110,9 @@ def read_data(context, filepath, settings: ImportSettings):
                     1, int(round(active_action["nad_duration"])) + 1
                 )
                 context.scene.frame_set(1)
-                print(f"Imported {len(imported_actions)} matching NAD "
-                      f"animations; active action: '{active_action.name}'")
+                debug_print(f"Imported {len(imported_actions)} matching NAD "
+                            f"animations; active action: "
+                            f"'{active_action.name}'")
         elif os.path.isfile(nad_path):
             import_nad_file(nad_path, armature_obj, nodFile.bones)
         else:
@@ -195,6 +199,13 @@ class NodFileImport(Operator, ImportHelper):
                  "ExtractedModels\\Christof_kneel.nad"),
     )
 
+    debug_log: BoolProperty(
+        name="Debug Logging",
+        description=("Print detailed NOD mesh, skeleton and animation "
+                     "diagnostics to the console"),
+        default=False,
+    )
+
     textures_path: StringProperty(
         name="Textures path",
         description="Path to the folder in which the textures are located",
@@ -222,5 +233,6 @@ class NodFileImport(Operator, ImportHelper):
             self.use_bind_pose_positions,
             self.use_nms,
             self.nms_path,
+            self.debug_log,
         )
         return read_data(context, self.filepath, settings)
