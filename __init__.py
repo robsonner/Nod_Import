@@ -1,10 +1,11 @@
 bl_info = {
-    "name": "Nod Import/Export plugin",
-    "description": "Imports/Exports models from/to Vampire:The Masquerade-Redemption NOD format",
+    "name": "VTM Redemption NOD Importer",
+    "description": "Imports models from Vampire:The Masquerade-Redemption NOD format",
     "author": "RK",
+    "version": (0, 1, 0),
+    "blender": (5, 2, 0),
+    "location": "File > Import > Nod Import (.nod)",
     "category": "Import-Export",
-    "version": (0, 0, 3),
-    "blender": (3, 6, 0)
 }
 
 import bpy
