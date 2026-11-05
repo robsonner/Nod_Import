@@ -240,7 +240,7 @@ def menu_func_import(self, context):
 
 
 class NodFileImport(Operator, ImportHelper):
-    """This appears in the tooltip of the operator and in the generated docs"""
+    """Import a Vampire: The Masquerade - Redemption NOD model and NAD animations"""
     bl_idname = "nod_import.data"
     bl_label = "Import NOD file"
     bl_options = {'REGISTER', 'UNDO'}

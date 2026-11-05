@@ -83,7 +83,7 @@ Reverse-engineering specifications and HTML documentation can be found in the `D
 ## TODO
 
 - Exporting models and animations back to `.nod` / `.nad` format.
-
-## License
-
-This project is licensed under the GNU General Public License v3.0 or later ([GPL-3.0-or-later](LICENSE)).
+
+## License
+
+This project is licensed under the GNU General Public License v3.0 or later ([GPL-3.0-or-later](LICENSE)).

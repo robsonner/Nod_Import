@@ -209,6 +209,7 @@ def CreateMeshes(nodFile: NodFile, settings: ImportSettings, collection=None):
             nodFile.vertices,
             nodFile.bones,
             use_bind_pose_positions=settings.use_bind_pose_positions,
+            collection=collection,
         )
         for mesh_obj, group_vertices, group_mesh in weighted_meshes:
             attach_nod_mesh_to_armature(

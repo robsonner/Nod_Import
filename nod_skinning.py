@@ -2,7 +2,6 @@ from collections import defaultdict
 import bpy
 from mathutils import Vector
 from .nod_math import nod_bind_world_position
-import mathutils
 from .debug_logging import debug_print
 
 NOD_GROUP_NOWEIGHTS = 0x2
@@ -10,7 +9,7 @@ NOD_GROUP_NOSKINNING = 0x4
 NOD_GROUP_KNOWN_FLAGS = 0xF
 
 def convert_to_mathutils_vector(v):
-    return mathutils.Vector((v.x, v.y, v.z))
+    return Vector((v.x, v.y, v.z))
 
 def get_nod_bone_world_rest_position(nod_bone):
     """Recover the world-space rest position from NOD's inverse bind matrix."""
@@ -174,7 +173,7 @@ def create_blender_skeleton_from_nod_with_mesh(
     debug_print(f"=== CALCULATING BONE POSITIONS: {position_mode} ===")
     bone_positions = {}
     for i in range(len(nod_bones)):
-        bone_positions[i] = {"position": mathutils.Vector((0, 0, 0)), "weight": 0}
+        bone_positions[i] = {"position": Vector((0, 0, 0)), "weight": 0}
     
     skipped_vertices_count = 0
     num_bones = len(nod_bones)
@@ -255,7 +254,10 @@ def create_blender_skeleton_from_nod_with_mesh(
     
     # Link to scene collection
     target_collection = collection if collection is not None else bpy.context.collection
-    target_collection.objects.link(armature_obj)
+    if target_collection is None and bpy.context.scene is not None:
+        target_collection = bpy.context.scene.collection
+    if target_collection is not None:
+        target_collection.objects.link(armature_obj)
     
     # Set as active object and enter edit mode
     armature_obj.select_set(True)
