@@ -1,3 +1,4 @@
+import bisect
 import math
 import os
 
@@ -11,6 +12,8 @@ from .debug_logging import debug_print
 NAD_TRACK_ROTATION = 0
 NAD_TRACK_TRANSLATION = 1
 NAD_TRACK_SCALE = 2
+
+NAD_BAKE_STEP = 1.0
 
 # Keyframe tag names from Vampire: The Masquerade – Redemption NAD specification (Docs/nad.htm)
 NAD_TAG_NAMES = {
@@ -62,25 +65,50 @@ def _local_bind_matrices(nod_bones, bind_world):
 
 
 def _evaluate_track(track, frame):
-    """Linearly evaluate one NAD vector track at a source frame."""
-    if frame <= track.keys[0].frame:
-        return Vector(track.keys[0].value)
-    if frame >= track.keys[-1].frame:
-        return Vector(track.keys[-1].value)
-    for index in range(len(track.keys) - 1):
-        left = track.keys[index]
-        right = track.keys[index + 1]
-        if left.frame <= frame <= right.frame:
-            distance = right.frame - left.frame
-            factor = 0.0 if distance <= 0.0 else (frame - left.frame) / distance
-            return Vector(left.value).lerp(Vector(right.value), factor)
-    return Vector(track.keys[-1].value)
+    """Evaluate one NAD vector track at a source frame using Hermite curve interpolation."""
+    keys = track.keys
+    if not keys:
+        return Vector((0.0, 0.0, 0.0))
+    if frame <= keys[0].frame:
+        return Vector(keys[0].value)
+    if frame >= keys[-1].frame:
+        return Vector(keys[-1].value)
+
+    frames = getattr(track, "_frames", None)
+    if frames is None:
+        frames = [key.frame for key in keys]
+        track._frames = frames
+
+    index = bisect.bisect_right(frames, frame) - 1
+    left = keys[index]
+    right = keys[index + 1]
+
+    distance = right.frame - left.frame
+    if left.frame_scale <= 0.0 or distance <= 0.0:
+        return Vector(left.value)
+
+    s = (frame - left.frame) * left.frame_scale
+    val = left.value
+    c = left.c_factor
+    b = left.b_factor
+    a = left.a_factor
+
+    return Vector((
+        val[0] + s * (c[0] + s * (b[0] + s * a[0])),
+        val[1] + s * (c[1] + s * (b[1] + s * a[1])),
+        val[2] + s * (c[2] + s * (b[2] + s * a[2])),
+    ))
 
 
 def _animation_frames(nad_file):
-    frames = {0.0, float(nad_file.duration)}
+    duration = float(nad_file.duration)
+    frames = {0.0, duration}
     for track in nad_file.bone_tracks:
         frames.update(float(key.frame) for key in track.keys)
+    if NAD_BAKE_STEP > 0.0:
+        count = int(math.floor(duration / NAD_BAKE_STEP))
+        for i in range(count + 1):
+            frames.add(float(i * NAD_BAKE_STEP))
     return sorted(frames)
 
 
