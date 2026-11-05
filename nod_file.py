@@ -1,8 +1,9 @@
-from . nod_header import NodHeader
-from . nod_bone import NodBone
-from . nod_vertex import NodVertex
-from . nod_face import NodFace
-from . nod_mesh_group import NodMeshGroup
+from .nod_header import NodHeader
+from .nod_bone import NodBone
+from .nod_vertex import NodVertex
+from .nod_face import NodFace
+from .nod_mesh_group import NodMeshGroup
+
 
 class NodFile:
     header: NodHeader
@@ -24,11 +25,11 @@ class NodFile:
 
         self.vertices = []
         for i in range(self.header.num_vertices):
-            self.vertices.append(NodVertex(bs)) 
+            self.vertices.append(NodVertex(bs))
         if self.header.HASLOD:
             for i in range(self.header.num_vertices):
                 self.vertices[i].lod_index = bs.ReadUInt16()
-        
+
         self.faces = []
         for i in range(self.header.num_faces):
             self.faces.append(NodFace(bs))
@@ -36,3 +37,6 @@ class NodFile:
         self.mesh_groups = []
         for i in range(self.header.num_groups):
             self.mesh_groups.append(NodMeshGroup(bs))
+
+        if bs.position != bs.length:
+            print(f"WARNING: NOD reader ended at {bs.position} of {bs.length} bytes")

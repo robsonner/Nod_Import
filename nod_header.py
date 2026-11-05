@@ -1,14 +1,14 @@
 class NodHeader:
-    version: int #UINT
-    num_materials: int #UINT
-    material_names: list[str] #32 characters * NumMaterials
-    num_bones: int #Word (2 bytes)
-    num_meshes: int #WORD
-    num_vertices: int #UINT
-    num_faces: int #UINT
-    num_groups: int #WORD
-    model_flags: int #UINT
-    bounds: list[float] #6 floats, min(XYZ), max(XYZ)
+    version: int  # UINT
+    num_materials: int  # UINT
+    material_names: list[str]  # 32 characters * NumMaterials
+    num_bones: int  # Word (2 bytes)
+    num_meshes: int  # WORD
+    num_vertices: int  # UINT
+    num_faces: int  # UINT
+    num_groups: int  # WORD
+    model_flags: int  # UINT
+    bounds: tuple  # 6 floats, min(XYZ), max(XYZ)
 
     def __init__(self, bs):
         self.version = bs.ReadUInt32()
@@ -24,7 +24,7 @@ class NodHeader:
         self.num_groups = bs.ReadUInt16()
         self.model_flags = bs.ReadUInt32()
         self.bounds = bs.ReadFloats(6)
-        
+
         self.HASLOD = self.model_flags & 0x1
         self.INLINE = self.model_flags & 0x2
         self.STATIC = self.model_flags & 0x4

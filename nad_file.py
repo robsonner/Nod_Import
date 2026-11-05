@@ -29,6 +29,8 @@ class NadFile:
     def __init__(self, data: bytes):
         reader = BinaryReader(data, "little")
         self.version = reader.ReadUInt32()
+        if self.version != 3:
+            print(f"WARNING: NAD version is {self.version}, expected 3")
         self.num_bone_tracks = reader.ReadUInt32()
         self.flags = reader.ReadUInt32()
         self.duration = reader.ReadFloats(1)
