@@ -42,14 +42,15 @@ def add_mesh(name, verts, faces, normals,edges=None, col_name="Collection"):
     mesh.update()
     mesh.calc_loop_triangles()
 
-    for i, loop in enumerate(mesh.loops):
-        vert_idx = loop.vertex_index
-        if vert_idx < len(normals):
-            loop.normal = normals[vert_idx]
-
     # Enable smooth shading
     for face in mesh.polygons:
         face.use_smooth = True
+
+    if hasattr(mesh, 'use_auto_smooth'):
+        mesh.use_auto_smooth = True
+
+    if normals:
+        mesh.normals_split_custom_set_from_vertices(normals)
     
     return mesh, obj
 
