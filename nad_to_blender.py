@@ -12,11 +12,12 @@ NAD_TRACK_ROTATION = 0
 NAD_TRACK_TRANSLATION = 1
 NAD_TRACK_SCALE = 2
 
+# Keyframe tag names from Vampire: The Masquerade – Redemption NAD specification (Docs/nad.htm)
 NAD_TAG_NAMES = {
     0: "Lwalk", 1: "Rwalk", 2: "Lrun", 3: "Rrun", 4: "Fire",
     5: "Strike", 6: "Cast", 7: "Fall", 8: "Project", 9: "Flap",
-    10: "Suck", 11: "Splat", 12: "Land", 13: "Grab",
-    14: "Release", 15: "Weapon", 16: "Repeat", 17: "RepeatTo",
+    10: "Suck", 11: "Idle", 12: "Idle2", 13: "Codex1",
+    14: "Codex2", 15: "Codex3", 16: "Repeat", 17: "RepeatTo",
     18: "Throwdeath",
 }
 
@@ -139,14 +140,19 @@ def _target_pose_basis(target_pose_world, target_bind_world, nod_bones):
     return result
 
 
-def _add_fcurve(action, data_path, array_index, frames, values, group):
-    curve = action.fcurves.new(data_path=data_path, index=array_index,
-                               action_group=group)
-    curve.keyframe_points.add(len(frames))
-    for point_index, (frame, value) in enumerate(zip(frames, values)):
-        point = curve.keyframe_points[point_index]
-        point.co = (frame + 1.0, value)
-        point.interpolation = 'LINEAR'
+def _add_fcurve(action, armature_obj, data_path, array_index, frames, values, group):
+    curve = action.fcurve_ensure_for_datablock(
+        armature_obj, data_path, index=array_index, group_name=group
+    )
+    n = len(frames)
+    curve.keyframe_points.add(n)
+    flat = [coord for pair in zip(frames, values) for coord in (pair[0] + 1.0, pair[1])]
+    curve.keyframe_points.foreach_set("co", flat)
+    try:
+        curve.keyframe_points.foreach_set("interpolation", [1] * n)  # 1 == LINEAR
+    except Exception:
+        for point in curve.keyframe_points:
+            point.interpolation = 'LINEAR'
     curve.update()
 
 
@@ -213,24 +219,27 @@ def import_nad_animation(nad_file, armature_obj, nod_bones,
             data_path = f'pose.bones["{bone_name}"].{property_name}'
             values = bone_samples[property_name]
             for channel in range(channel_count):
-                _add_fcurve(action, data_path, channel, frames,
+                _add_fcurve(action, armature_obj, data_path, channel, frames,
                             [value[channel] for value in values], bone_name)
+
+    if armature_obj.animation_data.action_slot is None:
+        if action.slots:
+            armature_obj.animation_data.action_slot = action.slots[0]
+    assert armature_obj.animation_data.action_slot is not None
 
     action["nad_version"] = nad_file.version
     action["nad_flags"] = nad_file.flags
     action["nad_duration"] = nad_file.duration
 
-    scene = bpy.context.scene
-    scene.render.fps = 30
-    scene.render.fps_base = 1.0
-    scene.frame_start = 1
-    scene.frame_end = max(1, int(round(nad_file.duration)) + 1)
+    action.use_frame_range = True
+    action.frame_start = 1.0
+    action.frame_end = float(max(1, round(nad_file.duration) + 1))
+
     for tag_index, tag in enumerate(nad_file.tags):
         tag_name = NAD_TAG_NAMES.get(tag.tag_type, f"Tag_{tag.tag_type}")
         marker = action.pose_markers.new(f"NAD_{tag_name}_{tag_index:02d}")
         marker.frame = int(round(tag.frame)) + 1
 
-    scene.frame_set(1)
     debug_print(f"Imported matrix-retargeted NAD action '{action.name}': "
                 f"{len(tracks)}/{nad_file.num_bone_tracks} tracks, "
                 f"{len(frames)} sampled frames, {nad_file.num_tags} tags, "
@@ -241,4 +250,6 @@ def import_nad_animation(nad_file, armature_obj, nod_bones,
 def import_nad_file(filepath, armature_obj, nod_bones):
     nad_file = load_nad(filepath)
     action_name = os.path.splitext(os.path.basename(filepath))[0]
-    return import_nad_animation(nad_file, armature_obj, nod_bones, action_name)
+    action = import_nad_animation(nad_file, armature_obj, nod_bones, action_name)
+    action["nad_source"] = filepath
+    return action
