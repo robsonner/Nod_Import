@@ -1,3 +1,4 @@
+from collections import defaultdict
 import bpy
 from mathutils import Vector, Matrix
 import mathutils
@@ -55,9 +56,6 @@ def attach_nod_mesh_to_armature(mesh_obj, nod_vertices, nod_bones, armature_obj,
             f"mesh vertex count ({vertex_count})"
         )
 
-    vertex_groups = {}
-    assigned_vertices = set()
-
     # Some shipped NOD files contain the MSVC debug-fill pattern (0xCDCD,
     # 0xCDCE, 0xCDCF) in GroupFlags. Those values are uninitialised data, not
     # real flags. In particular, blindly testing bit 0x4 incorrectly makes the
@@ -65,25 +63,17 @@ def attach_nod_mesh_to_armature(mesh_obj, nod_vertices, nod_bones, armature_obj,
     flags_are_valid = (group_flags & ~NOD_GROUP_KNOWN_FLAGS) == 0
     effective_flags = group_flags if flags_are_valid else 0
     if not flags_are_valid:
-        print(f"WARNING: mesh '{mesh_obj.name}' has invalid/uninitialised NOD "
-              f"group flags 0x{group_flags:04X}; using per-vertex skinning")
+        debug_print(f"WARNING: mesh '{mesh_obj.name}' has invalid/uninitialised NOD "
+                    f"group flags 0x{group_flags:04X}; using per-vertex skinning")
 
-    def add_weight(vertex_index, bone_index, weight):
-        if not (0 <= bone_index < bone_count) or weight <= 0.0:
-            return
-        group = vertex_groups.get(bone_index)
-        if group is None:
-            group = mesh_obj.vertex_groups.get(f"Bone_{bone_index:03d}")
-            if group is None:
-                group = mesh_obj.vertex_groups.new(name=f"Bone_{bone_index:03d}")
-            vertex_groups[bone_index] = group
-        group.add([vertex_index], min(1.0, float(weight)), 'REPLACE')
-        assigned_vertices.add(vertex_index)
+    batch_weights = defaultdict(list)
+    assigned_vertices = set()
 
     if effective_flags & NOD_GROUP_NOSKINNING:
         if 0 <= group_bone_num < bone_count:
-            for vertex_index in range(vertex_count):
-                add_weight(vertex_index, group_bone_num, 1.0)
+            all_verts = list(range(vertex_count))
+            batch_weights[(group_bone_num, 1.0)].extend(all_verts)
+            assigned_vertices.update(all_verts)
         else:
             print(f"WARNING: mesh '{mesh_obj.name}' has invalid group bone "
                   f"index {group_bone_num}")
@@ -98,16 +88,36 @@ def attach_nod_mesh_to_armature(mesh_obj, nod_vertices, nod_bones, armature_obj,
 
             weight = max(0.0, min(1.0, float(nod_vertex.weight)))
             if not has_soft_weights or weight >= 1.0:
-                add_weight(vertex_index, bone_index, 1.0)
+                batch_weights[(bone_index, 1.0)].append(vertex_index)
+                assigned_vertices.add(vertex_index)
                 continue
 
-            add_weight(vertex_index, bone_index, weight)
             parent_index = nod_bones[bone_index].parent_id
-            if 0 <= parent_index < bone_count:
-                add_weight(vertex_index, parent_index, 1.0 - weight)
+            if 0 <= parent_index < bone_count and parent_index != bone_index:
+                if weight > 0.0:
+                    batch_weights[(bone_index, weight)].append(vertex_index)
+                    assigned_vertices.add(vertex_index)
+                parent_weight = 1.0 - weight
+                if parent_weight > 0.0:
+                    batch_weights[(parent_index, parent_weight)].append(vertex_index)
+                    assigned_vertices.add(vertex_index)
             else:
                 # A root bone has no parent, so keep the vertex fully bound.
-                add_weight(vertex_index, bone_index, 1.0)
+                batch_weights[(bone_index, 1.0)].append(vertex_index)
+                assigned_vertices.add(vertex_index)
+
+    vertex_groups = {}
+    for (bone_index, weight), indices in batch_weights.items():
+        if not indices or weight <= 0.0:
+            continue
+        group = vertex_groups.get(bone_index)
+        if group is None:
+            group_name = f"Bone_{bone_index:03d}"
+            group = mesh_obj.vertex_groups.get(group_name)
+            if group is None:
+                group = mesh_obj.vertex_groups.new(name=group_name)
+            vertex_groups[bone_index] = group
+        group.add(indices, min(1.0, float(weight)), 'REPLACE')
 
     # A valid deform setup needs both matching vertex groups and an Armature
     # modifier. Parenting also makes the meshes follow object-level movement of
@@ -124,13 +134,6 @@ def attach_nod_mesh_to_armature(mesh_obj, nod_vertices, nod_bones, armature_obj,
     mesh_obj.parent = armature_obj
     mesh_obj.matrix_world = world_matrix
 
-    for bone in armature_obj.data.bones:
-        bone.use_deform = True
-    armature_obj.data.pose_position = 'POSE'
-
-    mesh_obj.data.update()
-    bpy.context.view_layer.update()
-
     group_names = ", ".join(
         f"Bone_{bone_index:03d}" for bone_index in sorted(vertex_groups)
     ) or "none"
@@ -140,9 +143,27 @@ def attach_nod_mesh_to_armature(mesh_obj, nod_vertices, nod_bones, armature_obj,
           f"{len(assigned_vertices)}/{vertex_count} vertices")
     return modifier
 
+def get_nod_bone_children(nod_bones, bone_index):
+    """Collect all direct children indices of nod_bones[bone_index] using child_id and sibling_id.
+
+    Guards against invalid indices and circular sibling chains.
+    """
+    children = []
+    n = len(nod_bones)
+    if not (0 <= bone_index < n):
+        return children
+
+    child_idx = nod_bones[bone_index].child_id
+    visited = set()
+    while 0 <= child_idx < n and child_idx not in visited:
+        visited.add(child_idx)
+        children.append(child_idx)
+        child_idx = nod_bones[child_idx].sibling_id
+    return children
+
 def create_blender_skeleton_from_nod_with_mesh(
         nod_vertices, nod_bones, armature_name="NOD_Armature",
-        use_bind_pose_positions=False):
+        use_bind_pose_positions=False, collection=None):
     """
     Convert NOD bone structure to Blender armature.
     
@@ -150,13 +171,21 @@ def create_blender_skeleton_from_nod_with_mesh(
         nod_vertices: List of NodVertex objects
         nod_bones: List of NodBone objects
         armature_name: Name for the created armature
+        use_bind_pose_positions: Use bind pose positions or centroid positions
+        collection: Target collection (defaults to bpy.context.collection)
     
     Returns:
         bpy.types.Object: The created armature object
     """
     
-    # Clear existing armatures if any
-    bpy.ops.object.select_all(action='DESELECT')
+    # Ensure active object is in OBJECT mode
+    active_obj = bpy.context.view_layer.objects.active
+    if active_obj is not None and active_obj.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Deselect all objects safely without bpy.ops.object.select_all
+    for obj in bpy.context.view_layer.objects.selected:
+        obj.select_set(False)
     
     # FIRST: Calculate bone positions. Bind positions provide the actual joint
     # pivots; the legacy mode retains weighted vertex centroids for comparison.
@@ -167,8 +196,14 @@ def create_blender_skeleton_from_nod_with_mesh(
     for i in range(len(nod_bones)):
         bone_positions[i] = {"position": mathutils.Vector((0, 0, 0)), "weight": 0}
     
+    skipped_vertices_count = 0
+    num_bones = len(nod_bones)
     for vertex in nod_vertices:
         bone_index = vertex.bone_number
+        if not (0 <= bone_index < num_bones):
+            skipped_vertices_count += 1
+            continue
+
         weight = vertex.weight
         vertex_position = convert_to_mathutils_vector(vertex.position)
         
@@ -177,14 +212,16 @@ def create_blender_skeleton_from_nod_with_mesh(
         bone_positions[bone_index]["weight"] += weight
         
         # If weight < 1.0, distribute to parent bone
-        if weight < 1.0 and bone_index < len(nod_bones):
+        if weight < 1.0:
             nod_bone = nod_bones[bone_index]
             parent_bone_index = nod_bone.parent_id
             
-            if parent_bone_index >= 0 and parent_bone_index < len(nod_bones):
+            if 0 <= parent_bone_index < num_bones:
                 bone_positions[parent_bone_index]["position"] += vertex_position * (1 - weight)
                 bone_positions[parent_bone_index]["weight"] += (1 - weight)
     
+    debug_print(f"Centroid calculation: skipped {skipped_vertices_count} vertices with invalid bone_number")
+
     # Calculate average positions for each bone
     bone_avg_positions = {}
     for bone_index, data in bone_positions.items():
@@ -208,90 +245,132 @@ def create_blender_skeleton_from_nod_with_mesh(
             debug_print(f"Bone {bone_index}: no vertices, using absolute bind "
                   f"position = {bone_avg_positions[bone_index]}")
     
+    # Calculate scale-dependent tail parameters from bounding box
+    def compute_diagonal(points):
+        pts = list(points)
+        if not pts:
+            return 0.0
+        min_x = min(p.x for p in pts)
+        max_x = max(p.x for p in pts)
+        min_y = min(p.y for p in pts)
+        max_y = max(p.y for p in pts)
+        min_z = min(p.z for p in pts)
+        max_z = max(p.z for p in pts)
+        dx = max_x - min_x
+        dy = max_y - min_y
+        dz = max_z - min_z
+        return (dx * dx + dy * dy + dz * dz) ** 0.5
+
+    extent = compute_diagonal(bone_avg_positions.values())
+    if extent < 1e-4:
+        vert_points = [convert_to_mathutils_vector(v.position) for v in nod_vertices]
+        extent = compute_diagonal(vert_points)
+    extent = max(extent, 1e-3)
+    default_tail = Vector((0.0, 0.0, extent * 0.02))
+    threshold = extent * 1e-4
+
     # Create new armature
     armature = bpy.data.armatures.new(armature_name)
     armature_obj = bpy.data.objects.new(armature_name, armature)
     
-    # Link to scene
-    bpy.context.collection.objects.link(armature_obj)
+    # Link to scene collection
+    target_collection = collection if collection is not None else bpy.context.collection
+    target_collection.objects.link(armature_obj)
     
     # Set as active object and enter edit mode
+    armature_obj.select_set(True)
     bpy.context.view_layer.objects.active = armature_obj
     bpy.ops.object.mode_set(mode='EDIT')
     
-    # Create bones dictionary for easy lookup
-    bone_dict = {}
-    
-    # Create all bones using vertex-calculated positions
-    debug_print("\n=== CREATING BONES ===")
-    for i, nod_bone in enumerate(nod_bones):
-        # Create bone
-        bone = armature.edit_bones.new(f"Bone_{i:03d}")
-        bone_dict[i] = bone
+    try:
+        # Create bones dictionary for easy lookup
+        bone_dict = {}
         
-        # Use vertex-calculated position
-        bone.head = bone_avg_positions[i]
+        # Create all bones using vertex-calculated positions
+        debug_print("\n=== CREATING BONES ===")
+        for i, nod_bone in enumerate(nod_bones):
+            # Create bone
+            bone = armature.edit_bones.new(f"Bone_{i:03d}")
+            bone_dict[i] = bone
+            
+            # Use vertex-calculated position
+            bone.head = bone_avg_positions[i]
+            
+            # Set initial tail (will be corrected later)
+            bone.tail = bone.head + default_tail
+            
+            debug_print(f"Created bone {i}: {bone.name} at position {bone.head}")
         
-        # Set initial tail (will be corrected later)
-        bone.tail = bone.head + Vector((0, 0, 0.1))
-        
-        debug_print(f"Created bone {i}: {bone.name} at position {bone.head}")
-    
-    # Set up parent relationships
-    debug_print("\n=== SETTING UP PARENTS ===")
-    for i, nod_bone in enumerate(nod_bones):
-        bone = bone_dict[i]
-        
-        if nod_bone.parent_id != -1:
-            if nod_bone.parent_id < len(nod_bones):
-                parent_bone = bone_dict[nod_bone.parent_id]
-                bone.parent = parent_bone
-                debug_print(f"Bone {i} -> Parent {nod_bone.parent_id}")
-            else:
-                print(f"ERROR: Bone {i} has invalid parent_id {nod_bone.parent_id}")
-        else:
-            debug_print(f"Bone {i} is ROOT bone")
-    
-    # Fix bone tails based on children
-    debug_print("\n=== FIXING BONE TAILS ===")
-    for i, nod_bone in enumerate(nod_bones):
-        bone = bone_dict[i]
-        
-        # Collect ALL children by following the sibling chain
-        all_children = []
-        if nod_bone.child_id != -1 and nod_bone.child_id < len(nod_bones):
-            child_idx = nod_bone.child_id
-            while child_idx != -1 and child_idx < len(nod_bones):
-                all_children.append(child_idx)
-                child_nod = nod_bones[child_idx]
-                child_idx = child_nod.sibling_id
-        
-        if all_children:
-            # Point to first child
-            first_child = bone_dict[all_children[0]]
-            direction = first_child.head - bone.head
-            if direction.length > 0.001:
-                bone.tail = first_child.head
-                debug_print(f"Bone {i} tail -> first child {all_children[0]} (all children: {all_children})")
-            else:
-                bone.tail = bone.head + Vector((0, 0, 0.1))
-                debug_print(f"Bone {i} and child at same position, using default tail")
-        else:
-            # No children - use reasonable tail
-            if bone.parent:
-                # Use parent direction but shorter
-                parent_dir = bone.head - bone.parent.head
-                if parent_dir.length > 0.001:
-                    bone.tail = bone.head + parent_dir.normalized() * (parent_dir.length * 0.3)
-                else:
-                    bone.tail = bone.head + Vector((0, 0, 0.1))
-            else:
-                bone.tail = bone.head + Vector((0, 0, 0.1))
-            debug_print(f"Bone {i} is leaf bone")
+        # Set up parent relationships
+        debug_print("\n=== SETTING UP PARENTS ===")
+        for i, nod_bone in enumerate(nod_bones):
+            bone = bone_dict[i]
+            parent_id = nod_bone.parent_id
+            
+            if parent_id == -1:
+                debug_print(f"Bone {i} is ROOT bone")
+                continue
 
-    # Return to object mode
-    bpy.ops.object.mode_set(mode='OBJECT')
-    
+            if not (0 <= parent_id < len(nod_bones) and parent_id != i):
+                print(f"WARNING: Bone {i} has invalid parent_id {parent_id}; keeping as root")
+                continue
+
+            parent_bone = bone_dict[parent_id]
+            curr = parent_bone
+            has_cycle = False
+            visited_parents = set()
+            while curr is not None:
+                if curr == bone or curr in visited_parents:
+                    has_cycle = True
+                    break
+                visited_parents.add(curr)
+                curr = curr.parent
+
+            if has_cycle:
+                print(f"WARNING: Bone {i} parenting to {parent_id} would create a cycle; keeping as root")
+                continue
+
+            bone.parent = parent_bone
+            debug_print(f"Bone {i} -> Parent {parent_id}")
+        
+        # Fix bone tails based on children
+        debug_print("\n=== FIXING BONE TAILS ===")
+        for i, nod_bone in enumerate(nod_bones):
+            bone = bone_dict[i]
+            all_children = get_nod_bone_children(nod_bones, i)
+            
+            if all_children:
+                # Point to first child
+                first_child = bone_dict[all_children[0]]
+                direction = first_child.head - bone.head
+                if direction.length > threshold:
+                    bone.tail = first_child.head
+                    debug_print(f"Bone {i} tail -> first child {all_children[0]} (all children: {all_children})")
+                else:
+                    bone.tail = bone.head + default_tail
+                    debug_print(f"Bone {i} and child at same position, using default tail")
+            else:
+                # No children - use reasonable tail
+                if bone.parent:
+                    # Use parent direction but shorter
+                    parent_dir = bone.head - bone.parent.head
+                    if parent_dir.length > threshold:
+                        bone.tail = bone.head + parent_dir.normalized() * (parent_dir.length * 0.3)
+                    else:
+                        bone.tail = bone.head + default_tail
+                else:
+                    bone.tail = bone.head + default_tail
+                debug_print(f"Bone {i} is leaf bone")
+    finally:
+        if bpy.context.view_layer.objects.active != armature_obj:
+            bpy.context.view_layer.objects.active = armature_obj
+        if armature_obj.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+    for bone in armature.bones:
+        bone.use_deform = True
+    armature.pose_position = 'POSE'
+
     debug_print("\n=== ARMATURE CREATED ===")
     debug_print(f"Armature '{armature_name}' created with {len(nod_bones)} bones")
     
