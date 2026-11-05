@@ -6,6 +6,7 @@ import bpy
 from mathutils import Euler, Matrix, Quaternion, Vector
 
 from .nad_file import NadFile
+from .nod_math import nod_bind_world_matrix
 from .debug_logging import debug_print
 
 
@@ -35,22 +36,8 @@ def _nad_euler_to_quaternion(value):
                  'XYZ').to_quaternion()
 
 
-def _nod_inverse_bind_matrix(nod_bone):
-    """Convert NOD's serialized row-vector Matrix43 to a Blender matrix."""
-    values = []
-    for row in nod_bone.rest_matrix_inverse:
-        values.extend((row.x, row.y, row.z, row.w))
-    return Matrix((
-        (values[0], values[3], values[6], values[9]),
-        (values[1], values[4], values[7], values[10]),
-        (values[2], values[5], values[8], values[11]),
-        (0.0, 0.0, 0.0, 1.0),
-    ))
-
-
 def _nod_bind_world_matrices(nod_bones):
-    return [_nod_inverse_bind_matrix(bone).inverted_safe()
-            for bone in nod_bones]
+    return [nod_bind_world_matrix(bone) for bone in nod_bones]
 
 
 def _local_bind_matrices(nod_bones, bind_world):

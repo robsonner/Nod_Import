@@ -1,6 +1,7 @@
 from collections import defaultdict
 import bpy
-from mathutils import Vector, Matrix
+from mathutils import Vector
+from .nod_math import nod_bind_world_position
 import mathutils
 from .debug_logging import debug_print
 
@@ -12,30 +13,9 @@ def convert_to_mathutils_vector(v):
     return mathutils.Vector((v.x, v.y, v.z))
 
 def get_nod_bone_world_rest_position(nod_bone):
-    """Recover only the world-space position from NOD's inverse bind matrix.
+    """Recover the world-space rest position from NOD's inverse bind matrix."""
+    return nod_bind_world_position(nod_bone)
 
-    The 12 serialized floats form a row-vector Matrix43: three inverse
-    rotation rows followed by the inverse translation. For a rigid transform,
-    the forward translation is ``-R_inv * T_inv``. Deliberately do not return
-    or apply its rotation: the existing Blender bone orientation logic must
-    remain unchanged.
-    """
-    matrix_rows = nod_bone.rest_matrix_inverse
-    values = []
-    for row in matrix_rows:
-        values.extend((row.x, row.y, row.z, row.w))
-
-    inverse_rotation = (
-        values[0:3],
-        values[3:6],
-        values[6:9],
-    )
-    inverse_translation = values[9:12]
-    return Vector(tuple(
-        -sum(inverse_translation[column] * inverse_rotation[row][column]
-             for column in range(3))
-        for row in range(3)
-    ))
 
 def attach_nod_mesh_to_armature(mesh_obj, nod_vertices, nod_bones, armature_obj,
                                 group_flags=0, group_bone_num=0):

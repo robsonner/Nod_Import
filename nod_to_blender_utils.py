@@ -1,20 +1,16 @@
 import math
 import os
+
 import bpy
 
-from .nod_bone import NodBone
 from .binary_reader import BinaryReader
-from .vector3 import Vector3
-from .vector2 import Vector2
-from .nod_vertex import NodVertex
-from .nod_face import NodFace
-from .nod_file import NodFile
-from bpy.types import ArmatureEditBones
-from mathutils import Vector, Matrix
-from .nod_to_blender_skeleton import *
-from .test_weights_bones import *
-from .import_settings import ImportSettings
 from .debug_logging import debug_print
+from .import_settings import ImportSettings
+from .nod_file import NodFile
+from .nod_skinning import (
+    attach_nod_mesh_to_armature,
+    create_blender_skeleton_from_nod_with_mesh,
+)
 
 
 def LoadModel(data) -> NodFile:
@@ -154,7 +150,6 @@ def CreateMeshes(nodFile: NodFile, settings: ImportSettings, collection=None):
     for group_idx, groupMesh in enumerate(nodFile.mesh_groups):
         vertices = []
         faces = []
-        edges = []
         normals = []
         uv = []
         for j in range(groupMesh.num_vertices):

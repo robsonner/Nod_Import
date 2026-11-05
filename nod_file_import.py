@@ -10,7 +10,7 @@ from .debug_logging import debug_print, set_debug_logging
 from .import_settings import ImportSettings
 from .nad_to_blender import import_nad_file
 from .nms_file import find_nms_for_nod, resolve_nms_animations
-from .nod_to_blender_utils import *
+from .nod_to_blender_utils import CreateMeshes, LoadModel
 
 
 def find_matching_nad_files(nod_path, animation_path=""):
