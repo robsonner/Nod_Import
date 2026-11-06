@@ -6,7 +6,8 @@ import bpy
 from mathutils import Euler, Matrix, Quaternion, Vector
 
 from .nad_file import NadFile
-from .nod_math import nod_bind_world_matrix
+from .nod_math import matrix_to_nod_rest_matrix_inverse, nod_bind_world_matrix
+from .vector3 import Vector3
 from .vector4 import Vector4
 from .debug_logging import debug_print
 
@@ -44,9 +45,10 @@ def _nod_bind_world_matrices(nod_bones):
 class _StoredNodBone:
     """Lightweight NOD bone reconstructed from properties stored on a Blender Armature."""
 
-    def __init__(self, parent_id, rest_matrix_inverse):
+    def __init__(self, parent_id, rest_matrix_inverse, rest_translate=None):
         self.parent_id = parent_id
         self.rest_matrix_inverse = rest_matrix_inverse
+        self.rest_translate = rest_translate or Vector3(0.0, 0.0, 0.0)
 
 
 def reconstruct_nod_bones_from_armature(armature_obj):
@@ -88,13 +90,15 @@ def reconstruct_nod_bones_from_armature(armature_obj):
             ]
         else:
             inv_mat = bone.matrix_local.inverted_safe()
-            rest_matrix_inverse = [
-                Vector4(inv_mat[0][0], inv_mat[1][0], inv_mat[2][0], inv_mat[0][3]),
-                Vector4(inv_mat[0][1], inv_mat[1][1], inv_mat[2][1], inv_mat[1][3]),
-                Vector4(inv_mat[0][2], inv_mat[1][2], inv_mat[2][2], inv_mat[2][3]),
-            ]
+            rest_matrix_inverse = matrix_to_nod_rest_matrix_inverse(inv_mat)
 
-        reconstructed.append(_StoredNodBone(parent_id, rest_matrix_inverse))
+        raw_trans = bone.get("nod_rest_translate")
+        if raw_trans is not None and len(raw_trans) == 3:
+            rest_translate = Vector3(float(raw_trans[0]), float(raw_trans[1]), float(raw_trans[2]))
+        else:
+            rest_translate = Vector3(0.0, 0.0, 0.0)
+
+        reconstructed.append(_StoredNodBone(parent_id, rest_matrix_inverse, rest_translate))
     return reconstructed
 
 

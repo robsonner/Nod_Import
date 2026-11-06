@@ -173,6 +173,10 @@ def CreateMeshes(nodFile: NodFile, settings: ImportSettings, collection=None):
             mesh_name = f"NOD_Mesh_{group_idx:02d}"
 
         mesh, obj = add_mesh(mesh_name, vertices, faces, normals, collection=collection)
+        obj["nod_group_index"] = int(group_idx)
+        obj["nod_mesh_name"] = mesh_name
+        obj["nod_group_flags"] = int(groupMesh.group_flags)
+        obj["nod_group_bone_num"] = int(groupMesh.bone_num)
         weighted_meshes.append((
             obj,
             nodFile.vertices[vertPosition - groupMesh.num_vertices:vertPosition],
