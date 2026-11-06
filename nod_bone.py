@@ -15,7 +15,19 @@ class NodBone:
     # so -1 is only valid for that bone.
     parent_id: int  # Signed short (2 bytes)
 
-    def __init__(self, bs):
+    def __init__(self, bs=None):
+        if bs is None:
+            self.rest_translate = Vector3(0.0, 0.0, 0.0)
+            self.rest_matrix_inverse = [
+                Vector4(1.0, 0.0, 0.0, 0.0),
+                Vector4(0.0, 1.0, 0.0, 0.0),
+                Vector4(0.0, 0.0, 1.0, 0.0),
+            ]
+            self.sibling_id = -1
+            self.child_id = -1
+            self.parent_id = -1
+            return
+
         self.rest_translate = Vector3(*bs.ReadFloats(3))
         self.rest_matrix_inverse = []
         for x in range(3):
@@ -23,3 +35,15 @@ class NodBone:
         self.sibling_id = bs.ReadInt16()
         self.child_id = bs.ReadInt16()
         self.parent_id = bs.ReadInt16()
+
+    def write(self, bw) -> None:
+        bw.WriteFloats(
+            self.rest_translate.x,
+            self.rest_translate.y,
+            self.rest_translate.z,
+        )
+        for row in self.rest_matrix_inverse:
+            bw.WriteFloats(row.x, row.y, row.z, row.w)
+        bw.WriteInt16(self.sibling_id)
+        bw.WriteInt16(self.child_id)
+        bw.WriteInt16(self.parent_id)
