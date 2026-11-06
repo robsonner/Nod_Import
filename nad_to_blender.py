@@ -7,6 +7,7 @@ from mathutils import Euler, Matrix, Quaternion, Vector
 
 from .nad_file import NadFile
 from .nod_math import nod_bind_world_matrix
+from .vector4 import Vector4
 from .debug_logging import debug_print
 
 
@@ -38,6 +39,63 @@ def _nad_euler_to_quaternion(value):
 
 def _nod_bind_world_matrices(nod_bones):
     return [nod_bind_world_matrix(bone) for bone in nod_bones]
+
+
+class _StoredNodBone:
+    """Lightweight NOD bone reconstructed from properties stored on a Blender Armature."""
+
+    def __init__(self, parent_id, rest_matrix_inverse):
+        self.parent_id = parent_id
+        self.rest_matrix_inverse = rest_matrix_inverse
+
+
+def reconstruct_nod_bones_from_armature(armature_obj):
+    """Reconstruct NOD bone bind data from custom properties stored on an imported armature."""
+    if armature_obj is None or armature_obj.type != 'ARMATURE':
+        raise ValueError("A Blender armature object is required")
+
+    bones = armature_obj.data.bones
+    bone_count = len(bones)
+    if bone_count == 0:
+        raise ValueError(f"Armature '{armature_obj.name}' has no bones")
+
+    reconstructed = []
+    for index in range(bone_count):
+        bone_name = f"Bone_{index:03d}"
+        bone = bones.get(bone_name)
+        if bone is None:
+            raise ValueError(
+                f"Armature '{armature_obj.name}' is missing expected NOD bone '{bone_name}'"
+            )
+
+        if "nod_parent_id" in bone:
+            parent_id = int(bone["nod_parent_id"])
+        elif bone.parent is not None and bone.parent.name.startswith("Bone_"):
+            try:
+                parent_id = int(bone.parent.name.split("_", 1)[1])
+            except ValueError:
+                parent_id = -1
+        else:
+            parent_id = -1
+
+        raw_inv = bone.get("nod_rest_matrix_inverse")
+        if raw_inv is not None and len(raw_inv) == 12:
+            vals = [float(x) for x in raw_inv]
+            rest_matrix_inverse = [
+                Vector4(vals[0], vals[1], vals[2], vals[3]),
+                Vector4(vals[4], vals[5], vals[6], vals[7]),
+                Vector4(vals[8], vals[9], vals[10], vals[11]),
+            ]
+        else:
+            inv_mat = bone.matrix_local.inverted_safe()
+            rest_matrix_inverse = [
+                Vector4(inv_mat[0][0], inv_mat[1][0], inv_mat[2][0], inv_mat[0][3]),
+                Vector4(inv_mat[0][1], inv_mat[1][1], inv_mat[2][1], inv_mat[1][3]),
+                Vector4(inv_mat[0][2], inv_mat[1][2], inv_mat[2][2], inv_mat[2][3]),
+            ]
+
+        reconstructed.append(_StoredNodBone(parent_id, rest_matrix_inverse))
+    return reconstructed
 
 
 def _local_bind_matrices(nod_bones, bind_world):
@@ -171,10 +229,12 @@ def _add_fcurve(action, armature_obj, data_path, array_index, frames, values, gr
     curve.update()
 
 
-def import_nad_animation(nad_file, armature_obj, nod_bones,
+def import_nad_animation(nad_file, armature_obj, nod_bones=None,
                          action_name="NAD_Animation"):
     if armature_obj is None or armature_obj.type != 'ARMATURE':
         raise ValueError("A Blender armature object is required for NAD import")
+    if nod_bones is None:
+        nod_bones = reconstruct_nod_bones_from_armature(armature_obj)
     if len(nod_bones) != len(armature_obj.data.bones):
         raise ValueError("NAD/NOD bone count does not match Blender armature")
 
@@ -262,7 +322,7 @@ def import_nad_animation(nad_file, armature_obj, nod_bones,
     return action
 
 
-def import_nad_file(filepath, armature_obj, nod_bones):
+def import_nad_file(filepath, armature_obj, nod_bones=None):
     nad_file = load_nad(filepath)
     action_name = os.path.splitext(os.path.basename(filepath))[0]
     action = import_nad_animation(nad_file, armature_obj, nod_bones, action_name)

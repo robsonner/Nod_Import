@@ -84,8 +84,21 @@ def main():
         clear_scene_data()
         result1 = bpy.ops.nod_import.data(filepath=nod_file, load_animation=False)
         assert result1 == {"FINISHED"}, f"Run 1 operator failed with {result1}"
-        verify_armature_and_meshes(expected_bones)
+        armature_obj1, _ = verify_armature_and_meshes(expected_bones)
+        assert len(bpy.data.actions) == 0, "Expected 0 actions when load_animation=False"
         print("Run 1 passed: mesh, armature, and modifiers verified.")
+
+        # Run 1b: standalone animation import onto existing armature via the same operator
+        nad_dir = pathlib.Path(nod_file).parent
+        sample_nads = sorted(nad_dir.glob("christof_*.nad"))
+        if sample_nads:
+            print("\n--- Test Run 1b: standalone .nad import via nod_import.data onto loaded armature ---")
+            result1b = bpy.ops.nod_import.data(filepath=str(sample_nads[0]))
+            assert result1b == {"FINISHED"}, f"Run 1b operator failed with {result1b}"
+            assert len(bpy.data.actions) == 1, f"Expected 1 action, found {len(bpy.data.actions)}"
+            assert armature_obj1.animation_data is not None
+            assert armature_obj1.animation_data.action is not None
+            print(f"Run 1b passed: loaded action '{armature_obj1.animation_data.action.name}' onto existing armature.")
 
         # Run 2: default (with animations)
         print("\n--- Test Run 2: default (with animation) ---")

@@ -31,28 +31,69 @@ def load_nms(filepath):
 
 
 def find_nms_for_nod(nod_path, nms_path=""):
-    """Use an explicit NMS path or find <model>.nms beside the NOD file."""
+    """Use an explicit NMS path or find <model>.nms beside the NOD file or in ../Motions / ../Anims."""
     if nms_path:
         explicit_path = os.path.abspath(nms_path)
         return explicit_path if os.path.isfile(explicit_path) else None
 
-    model_name = os.path.splitext(os.path.basename(nod_path))[0] + ".nms"
+    model_name = os.path.splitext(os.path.basename(nod_path))[0].lower() + ".nms"
     nod_directory = os.path.dirname(os.path.abspath(nod_path))
-    automatic_path = os.path.join(nod_directory, model_name)
-    return automatic_path if os.path.isfile(automatic_path) else None
+    candidate_dirs = [
+        nod_directory,
+        os.path.normpath(os.path.join(nod_directory, "..", "Motions")),
+        os.path.normpath(os.path.join(nod_directory, "..", "Anims")),
+        os.path.join(nod_directory, "Motions"),
+        os.path.join(nod_directory, "Anims"),
+    ]
+    for cand_dir in candidate_dirs:
+        if not os.path.isdir(cand_dir):
+            continue
+        try:
+            for entry in os.listdir(cand_dir):
+                if entry.lower() == model_name:
+                    full_path = os.path.join(cand_dir, entry)
+                    if os.path.isfile(full_path):
+                        return full_path
+        except OSError:
+            continue
+    return None
 
 
 def resolve_nms_animations(nms_path, animation_directory):
-    """Resolve NMS NAD names case-insensitively and retain their metadata."""
+    """Resolve NMS NAD names case-insensitively across candidate animation directories."""
     motions = load_nms(nms_path)
-    try:
-        directory_files = {
-            filename.lower(): filename
-            for filename in os.listdir(animation_directory)
-        }
-    except OSError as error:
-        print(f"WARNING: cannot scan NAD directory "
-              f"'{animation_directory}': {error}")
+    nms_dir = os.path.dirname(os.path.abspath(nms_path))
+    anim_dir = os.path.abspath(animation_directory) if animation_directory else nms_dir
+
+    candidate_dirs = []
+    for d in (
+        anim_dir,
+        nms_dir,
+        os.path.normpath(os.path.join(nms_dir, "..", "Anims")),
+        os.path.join(nms_dir, "Anims"),
+        os.path.normpath(os.path.join(anim_dir, "..", "Anims")),
+        os.path.join(anim_dir, "Anims"),
+    ):
+        norm_d = os.path.normcase(os.path.abspath(d))
+        if norm_d not in {os.path.normcase(x) for x in candidate_dirs}:
+            candidate_dirs.append(os.path.abspath(d))
+
+    directory_files = {}
+    scanned_any = False
+    for cand_dir in candidate_dirs:
+        if not os.path.isdir(cand_dir):
+            continue
+        try:
+            for filename in os.listdir(cand_dir):
+                lower_name = filename.lower()
+                if lower_name not in directory_files:
+                    directory_files[lower_name] = os.path.join(cand_dir, filename)
+            scanned_any = True
+        except OSError:
+            continue
+
+    if not scanned_any:
+        print(f"WARNING: cannot scan NAD directory '{animation_directory}'")
         return [], {}
 
     paths = []
@@ -60,16 +101,15 @@ def resolve_nms_animations(nms_path, animation_directory):
     seen = set()
     missing = set()
     for motion in motions:
-        actual_name = directory_files.get(motion.nad_filename.lower())
-        if actual_name is None:
+        resolved_path = directory_files.get(motion.nad_filename.lower())
+        if resolved_path is None:
             missing.add(motion.nad_filename)
             continue
-        path = os.path.join(animation_directory, actual_name)
-        normalized = os.path.normcase(os.path.abspath(path))
+        normalized = os.path.normcase(os.path.abspath(resolved_path))
         metadata.setdefault(normalized, []).append(motion)
         if normalized not in seen:
             seen.add(normalized)
-            paths.append(path)
+            paths.append(resolved_path)
 
     if missing:
         print(f"WARNING: {len(missing)} NAD files referenced by "

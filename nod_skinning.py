@@ -349,8 +349,16 @@ def create_blender_skeleton_from_nod_with_mesh(
         if armature_obj.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
 
-    for bone in armature.bones:
-        bone.use_deform = True
+    for i, nod_bone in enumerate(nod_bones):
+        bone = armature.bones.get(f"Bone_{i:03d}")
+        if bone is not None:
+            bone.use_deform = True
+            bone["nod_parent_id"] = int(nod_bone.parent_id)
+            bone["nod_rest_matrix_inverse"] = [
+                float(val)
+                for row in nod_bone.rest_matrix_inverse
+                for val in (row.x, row.y, row.z, row.w)
+            ]
     armature.pose_position = 'POSE'
 
     debug_print("\n=== ARMATURE CREATED ===")

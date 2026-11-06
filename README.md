@@ -34,7 +34,12 @@ To build the distribution ZIP archive from the repository root:
 
 ## Import Options
 
-Access the importer from **File > Import > Nod Import (.nod)**. The operator exposes the following settings:
+Access the unified importer from **File > Import > Nod Import (.nod, .nad, .nms)**. Depending on the selected file type:
+
+- **Selecting a `.nod` file** imports the 3D model, skeleton, materials, and optionally its animations.
+- **Selecting one or more `.nad` files (or an `.nms` motion set)** imports the animation(s) directly onto the selected/existing NOD armature in the scene (similar to Blender Source Tools).
+
+The importer exposes the following settings when importing a `.nod` model:
 
 ### Skeleton
 - **Load Bones** (`load_bones`): Whether to load the armature skeleton and vertex groups (default: `True`).

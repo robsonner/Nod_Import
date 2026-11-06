@@ -2,15 +2,29 @@ import os
 import traceback
 
 import bpy
-from bpy.props import BoolProperty, StringProperty
-from bpy.types import Operator
+from bpy.props import BoolProperty, CollectionProperty, StringProperty
+from bpy.types import Operator, OperatorFileListElement
 from bpy_extras.io_utils import ImportHelper
 
 from .debug_logging import debug_print, set_debug_logging
 from .import_settings import ImportSettings
-from .nad_to_blender import import_nad_file
+from .nad_to_blender import import_nad_file, reconstruct_nod_bones_from_armature
 from .nms_file import find_nms_for_nod, resolve_nms_animations
 from .nod_to_blender_utils import CreateMeshes, LoadModel
+
+
+def _resolve_user_path(raw_path, base_dir):
+    text = raw_path.strip() if raw_path else ""
+    if not text:
+        return ""
+    if text.startswith("//"):
+        return os.path.abspath(bpy.path.abspath(text))
+    if os.path.isabs(text):
+        return os.path.abspath(text)
+    candidate_in_base = os.path.abspath(os.path.join(base_dir, text))
+    if os.path.exists(candidate_in_base) or not os.path.exists(text):
+        return candidate_in_base
+    return os.path.abspath(text)
 
 
 def find_matching_nad_files(nod_path, animation_path=""):
@@ -82,7 +96,7 @@ def read_data(context, filepath, settings: ImportSettings, report=None):
     raw_textures_path = raw_textures_path.strip() if raw_textures_path else ""
 
     if raw_textures_path:
-        tex_dir = bpy.path.abspath(raw_textures_path)
+        tex_dir = _resolve_user_path(raw_textures_path, nod_dir)
         resolved_tex_dir = os.path.join(tex_dir, "") if tex_dir else ""
     else:
         candidates = [
@@ -114,6 +128,9 @@ def read_data(context, filepath, settings: ImportSettings, report=None):
 
     existing_objs = set(bpy.data.objects)
     armature_obj = CreateMeshes(nodFile, settings)
+    if armature_obj is not None:
+        armature_obj["nod_source_path"] = os.path.abspath(filepath)
+        armature_obj["nod_model_name"] = os.path.splitext(os.path.basename(filepath))[0]
     imported_meshes = [
         obj for obj in bpy.data.objects
         if obj not in existing_objs and obj.type == 'MESH'
@@ -122,7 +139,7 @@ def read_data(context, filepath, settings: ImportSettings, report=None):
     if settings.load_animation:
         anim_path_raw = settings.animation_path.strip() if settings.animation_path else ""
         if anim_path_raw:
-            nad_path = bpy.path.abspath(anim_path_raw)
+            nad_path = _resolve_user_path(anim_path_raw, nod_dir)
         else:
             nad_path = os.path.splitext(os.path.abspath(filepath))[0] + ".nad"
         animation_directory = os.path.dirname(nad_path)
@@ -132,7 +149,7 @@ def read_data(context, filepath, settings: ImportSettings, report=None):
         elif settings.use_nms or settings.load_all_animations:
             requested_nms_text = settings.nms_path.strip() if settings.nms_path else ""
             requested_nms_path = (
-                bpy.path.abspath(requested_nms_text)
+                _resolve_user_path(requested_nms_text, nod_dir)
                 if requested_nms_text else ""
             )
             nms_path = None
@@ -235,23 +252,200 @@ def read_data(context, filepath, settings: ImportSettings, report=None):
     return {'FINISHED'}
 
 
+def _armature_from_object(obj):
+    if obj is None:
+        return None
+    if obj.type == 'ARMATURE':
+        return obj
+    if obj.type == 'MESH':
+        if obj.parent is not None and obj.parent.type == 'ARMATURE':
+            return obj.parent
+        for mod in obj.modifiers:
+            if mod.type == 'ARMATURE' and mod.object is not None:
+                return mod.object
+    return None
+
+
+def find_target_nod_armature(context):
+    """Find the target NOD armature from active object, selection, or scene."""
+    view_layer_objs = getattr(getattr(context, "view_layer", None), "objects", None)
+    active = getattr(view_layer_objs, "active", None) or getattr(context, "active_object", None)
+    arm = _armature_from_object(active)
+    if arm is not None:
+        return arm
+
+    for obj in getattr(context, "selected_objects", []) or []:
+        arm = _armature_from_object(obj)
+        if arm is not None:
+            return arm
+
+    scene = getattr(context, "scene", None)
+    if scene is not None:
+        scene_armatures = [obj for obj in scene.objects if obj.type == 'ARMATURE']
+        if len(scene_armatures) == 1:
+            return scene_armatures[0]
+    return None
+
+
+def import_animations_to_armature(
+    context,
+    armature_obj,
+    filepath,
+    files=None,
+    directory="",
+    load_all_matching=False,
+    debug_log=False,
+    report=None,
+):
+    """Import one or more NAD or NMS animations onto an existing NOD armature."""
+    def _report(level_set, message):
+        if report is not None:
+            report(level_set, message)
+        else:
+            lvl = list(level_set)[0] if level_set else "INFO"
+            print(f"{lvl}: {message}")
+
+    set_debug_logging(debug_log)
+
+    if armature_obj is None or armature_obj.type != 'ARMATURE':
+        raise ValueError("Select an imported NOD armature (or one of its meshes) first")
+
+    nod_bones = reconstruct_nod_bones_from_armature(armature_obj)
+
+    base_dir = directory or os.path.dirname(os.path.abspath(filepath))
+    selected_paths = []
+    if files:
+        for file_elem in files:
+            name = getattr(file_elem, "name", "")
+            if name:
+                candidate = os.path.join(base_dir, name)
+                if os.path.isfile(candidate):
+                    selected_paths.append(os.path.abspath(candidate))
+    if not selected_paths and filepath:
+        abs_fp = os.path.abspath(filepath)
+        if os.path.isfile(abs_fp):
+            selected_paths.append(abs_fp)
+
+    if not selected_paths:
+        raise FileNotFoundError(f"Animation file not found: '{filepath}'")
+
+    nad_queue = []
+    nms_metadata_by_path = {}
+    nms_source_by_path = {}
+    seen_paths = set()
+
+    def _enqueue_nad(path, nms_src=None, motion_entries=None):
+        norm = os.path.normcase(os.path.abspath(path))
+        if norm not in seen_paths:
+            seen_paths.add(norm)
+            nad_queue.append(path)
+        if nms_src:
+            nms_source_by_path[norm] = nms_src
+        if motion_entries:
+            nms_metadata_by_path[norm] = motion_entries
+
+    nod_source_path = armature_obj.get("nod_source_path", "")
+    nod_source_dir = os.path.dirname(nod_source_path) if nod_source_path else ""
+
+    for sel_path in selected_paths:
+        ext = os.path.splitext(sel_path)[1].lower()
+        sel_dir = os.path.dirname(sel_path)
+        if ext == ".nms":
+            nad_paths, nms_meta = resolve_nms_animations(
+                sel_path, nod_source_dir or sel_dir
+            )
+            for p in nad_paths:
+                norm_p = os.path.normcase(os.path.abspath(p))
+                _enqueue_nad(p, nms_src=sel_path, motion_entries=nms_meta.get(norm_p, []))
+        elif load_all_matching and len(selected_paths) == 1:
+            model_name = armature_obj.get("nod_model_name", "")
+            if not model_name:
+                stem = os.path.splitext(os.path.basename(sel_path))[0]
+                model_name = stem.split("_", 1)[0]
+            pseudo_nod = os.path.join(sel_dir, model_name + ".nod")
+            for p in find_matching_nad_files(pseudo_nod, sel_path):
+                _enqueue_nad(p)
+            if not nad_queue:
+                _enqueue_nad(sel_path)
+        else:
+            _enqueue_nad(sel_path)
+
+    if not nad_queue:
+        _report({'WARNING'}, f"No NAD animations found for '{filepath}'")
+        return {'CANCELLED'}
+
+    imported_actions = []
+    preferred_action = None
+    preferred_norm = os.path.normcase(os.path.abspath(selected_paths[0]))
+    skipped_count = 0
+    total_count = len(nad_queue)
+
+    for nad_path in nad_queue:
+        try:
+            action = import_nad_file(nad_path, armature_obj, nod_bones)
+            norm_key = os.path.normcase(os.path.abspath(nad_path))
+            motion_entries = nms_metadata_by_path.get(norm_key, [])
+            if motion_entries:
+                action["nms_source"] = nms_source_by_path.get(norm_key, "")
+                action["nms_motion_modes"] = ",".join(
+                    entry.mode for entry in motion_entries
+                )
+                action["nms_flags"] = ",".join(sorted({
+                    flag.lower()
+                    for entry in motion_entries
+                    for flag in entry.flags
+                }))
+            imported_actions.append(action)
+            if norm_key == preferred_norm:
+                preferred_action = action
+        except Exception as nad_err:
+            traceback.print_exc()
+            skipped_count += 1
+            print(f"ERROR: Failed to import NAD '{nad_path}': {nad_err}")
+
+    if skipped_count > 0:
+        _report({'WARNING'}, f"Skipped {skipped_count} of {total_count} NAD animations (see console)")
+
+    if not imported_actions:
+        return {'CANCELLED'}
+
+    active_action = preferred_action or imported_actions[0]
+    _activate_action(context, armature_obj, active_action)
+    debug_print(
+        f"Imported {len(imported_actions)} NAD animation(s) onto "
+        f"'{armature_obj.name}'; active action: '{active_action.name}'"
+    )
+    return {'FINISHED'}
+
+
 def menu_func_import(self, context):
-    self.layout.operator(NodFileImport.bl_idname, text="Nod Import (.nod)")
+    self.layout.operator(NodFileImport.bl_idname, text="Nod Import (.nod, .nad, .nms)")
 
 
 class NodFileImport(Operator, ImportHelper):
-    """Import a Vampire: The Masquerade - Redemption NOD model and NAD animations"""
+    """Import a Vampire: The Masquerade - Redemption model (.nod) or animation (.nad, .nms)"""
     bl_idname = "nod_import.data"
-    bl_label = "Import NOD file"
+    bl_label = "Import NOD / NAD / NMS"
     bl_options = {'REGISTER', 'UNDO'}
 
     # ImportHelper mixin class uses this
     filename_ext = ".nod"
 
     filter_glob: StringProperty(
-        default="*.nod",
+        default="*.nod;*.nad;*.nms",
         options={'HIDDEN'},
         maxlen=255,
+    )
+
+    files: CollectionProperty(
+        name="File Path",
+        type=OperatorFileListElement,
+        options={'SKIP_SAVE'},
+    )
+
+    directory: StringProperty(
+        subtype='DIR_PATH',
+        options={'HIDDEN', 'SKIP_SAVE'},
     )
 
     load_bones: BoolProperty(
@@ -290,17 +484,15 @@ class NodFileImport(Operator, ImportHelper):
 
     nms_path: StringProperty(
         name="NMS Motion Set",
-        description=("Optional NMS file override; leave empty to look beside "
-                     "the imported NOD using the same base filename"),
-        subtype="FILE_PATH",
+        description=("Optional NMS file path or filename override; leave empty "
+                     "to look beside the imported NOD using the same base filename"),
         default="",
     )
 
     animation_path: StringProperty(
         name="NAD Animation",
-        description=("NAD animation file; leave empty to use a file with the "
-                     "same base name or matching animations in the NOD directory"),
-        subtype="FILE_PATH",
+        description=("NAD animation file path or filename; leave empty to use "
+                     "a file with the same base name or matching animations in the NOD directory"),
         default="",
     )
 
@@ -315,12 +507,44 @@ class NodFileImport(Operator, ImportHelper):
         name="Textures path",
         description=("Path to textures folder; leave empty to search "
                      "Materials/, ../Materials/ or the NOD directory"),
-        subtype="DIR_PATH",
         default="",
     )
 
+    def _selected_extensions(self):
+        exts = set()
+        if self.files:
+            for f in self.files:
+                name = getattr(f, "name", "")
+                if name:
+                    ext = os.path.splitext(name)[1].lower()
+                    if ext:
+                        exts.add(ext)
+        if not exts and self.filepath:
+            ext = os.path.splitext(self.filepath)[1].lower()
+            if ext:
+                exts.add(ext)
+        return exts
+
+    def _is_animation_only_selection(self):
+        exts = self._selected_extensions()
+        return bool(exts) and exts.issubset({".nad", ".nms"})
+
     def draw(self, context):
         layout = self.layout
+
+        if self._is_animation_only_selection():
+            armature_obj = find_target_nod_armature(context)
+            box = layout.box()
+            box.label(text="Target Armature (Animation Import)")
+            if armature_obj is not None:
+                box.label(
+                    text=f"{armature_obj.name} ({len(armature_obj.data.bones)} bones)",
+                    icon='ARMATURE_DATA',
+                )
+            else:
+                box.label(text="No armature in scene / selected!", icon='ERROR')
+            layout.prop(self, "debug_log")
+            return
 
         # Skeleton section
         box = layout.box()
@@ -358,6 +582,30 @@ class NodFileImport(Operator, ImportHelper):
         active_obj = getattr(active_obj, "active", None)
         if active_obj is not None and active_obj.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
+
+        if self._is_animation_only_selection():
+            armature_obj = find_target_nod_armature(context)
+            if armature_obj is None:
+                self.report(
+                    {'ERROR'},
+                    "No target NOD armature found. Select an armature (or its mesh) first",
+                )
+                return {'CANCELLED'}
+            try:
+                return import_animations_to_armature(
+                    context,
+                    armature_obj,
+                    self.filepath,
+                    files=self.files,
+                    directory=self.directory,
+                    load_all_matching=False,
+                    debug_log=self.debug_log,
+                    report=self.report,
+                )
+            except Exception as exc:
+                traceback.print_exc()
+                self.report({'ERROR'}, f"NAD animation import failed: {exc}")
+                return {'CANCELLED'}
 
         settings = ImportSettings(
             self.load_bones,
