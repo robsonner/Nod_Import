@@ -3,6 +3,7 @@
 import os
 import pathlib
 import sys
+import tempfile
 
 # Ensure repository parent is in sys.path
 REPO_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -123,6 +124,38 @@ def main():
             f"Run 2 passed: {action_count} actions loaded, active action "
             f"'{anim_data.action.name}' with slot verified."
         )
+
+        # Run 3: Export .nod and .nad, then re-import into a clean scene
+        print("\n--- Test Run 3: Export NOD + NAD and Round-Trip Re-Import ---")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_nod = os.path.join(tmpdir, "exported_model.nod")
+            out_nad = os.path.join(tmpdir, "exported_anim.nad")
+
+            res_exp_nod = bpy.ops.nod_export.data(filepath=out_nod, export_format="NOD")
+            assert res_exp_nod == {"FINISHED"}, f"NOD export failed with {res_exp_nod}"
+            assert os.path.isfile(out_nod), "Exported .nod file was not created"
+
+            res_exp_nad = bpy.ops.nod_export.data(filepath=out_nad, export_format="NAD")
+            assert res_exp_nad == {"FINISHED"}, f"NAD export failed with {res_exp_nad}"
+            assert os.path.isfile(out_nad), "Exported .nad file was not created"
+
+            clear_scene_data()
+            res_reimp = bpy.ops.nod_import.data(
+                filepath=out_nod,
+                use_nms=False,
+                load_all_animations=False,
+                animation_path=out_nad,
+            )
+            assert res_reimp == {"FINISHED"}, f"Round-trip re-import failed with {res_reimp}"
+            arm_rt, meshes_rt = verify_armature_and_meshes(expected_bones)
+            assert len(meshes_rt) == len(meshes), (
+                f"Re-imported mesh count {len(meshes_rt)} != {len(meshes)}"
+            )
+            assert arm_rt.animation_data is not None and arm_rt.animation_data.action is not None
+            print(
+                f"Run 3 passed: exported and re-imported {len(meshes_rt)} meshes, "
+                f"{expected_bones} bones, and action '{arm_rt.animation_data.action.name}'."
+            )
 
         print("\nSmoke test completed successfully!")
 

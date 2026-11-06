@@ -1,14 +1,14 @@
-# VTM Redemption NOD Importer
+# VTM Redemption NOD Importer / Exporter
 
-Blender 5.2+ extension and add-on for importing 3D models and skeletal animations from *Vampire: The Masquerade – Redemption* (`.nod`, `.nad`, and `.nms` files).
+Blender 5.2+ extension and add-on for importing and exporting 3D models and skeletal animations from *Vampire: The Masquerade – Redemption* (`.nod`, `.nad`, and `.nms` files).
 
 ## Features
 
-- **Meshes & Geometry:** Imports multi-group geometry with UV texture coordinates, custom split normals, and LOD handling.
+- **Meshes & Geometry (Import & Export):** Multi-group geometry with UV texture coordinates, custom split normals, automatic triangulation, and UV/normal seam splitting on export.
 - **Materials & Textures:** Automatic material generation with Principled BSDF shader nodes and `.tga` texture lookup (supporting `Materials/`, `../Materials/`, or the NOD file directory).
-- **Armature & Rigging:** Full skeleton generation from NOD bone hierarchies, true bind-pose transforms via `RestMatrixInverse`, and vertex weight group assignments.
-- **NAD Skeletal Animations:** Imports `.nad` animation clips into Blender Actions (compatible with Blender 5.2 layered animation and action slots), sets scene timeline frame ranges (30 FPS), and imports animation tag event markers.
-- **NMS Motion Sets:** Supports `.nms` motion set scripts to resolve and batch-import associated animation sets.
+- **Armature & Rigging (Import & Export):** Full skeleton generation and export (`<= 64` bones), true bind-pose transforms via `RestMatrixInverse` (with optional preservation of imported game bind poses for 100% compatibility with original `.nad` files), and soft/rigid vertex weight assignments.
+- **NAD Skeletal Animations (Import & Export):** Imports and exports `.nad` animation clips using Blender 5.2 layered animation and action slots, cubic Hermite curve interpolation (`a/b/c_factor`), and animation tag event markers (`pose_markers`).
+- **NMS Motion Sets:** Supports `.nms` motion set scripts to resolve and batch-import associated animation sets (searching `Anims/`, `../Anims/`, and `../Motions/`).
 
 ## Requirements
 
@@ -19,11 +19,11 @@ Blender 5.2+ extension and add-on for importing 3D models and skeletal animation
 ### (a) Installing from Extension ZIP
 1. In Blender, navigate to **Edit > Preferences > Get Extensions**.
 2. Click the menu dropdown in the top-right corner and select **Install from Disk...**.
-3. Choose `nod_import-0.1.0.zip` (located in the `dist/` directory).
+3. Choose `nod_import-0.2.0.zip` (located in the `dist/` directory).
 
 Alternatively, install via the Blender command-line interface:
 ```powershell
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --command extension install-file -r user_default -e dist\nod_import-0.1.0.zip
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --command extension install-file -r user_default -e dist\nod_import-0.2.0.zip
 ```
 
 ### (b) Building the Extension ZIP from Source
@@ -58,6 +58,20 @@ The importer exposes the following settings when importing a `.nod` model:
 ### Diagnostics
 - **Debug Logging** (`debug_log`): Print detailed mesh, skeleton, and animation diagnostic messages to the console (default: `False`).
 
+## Export Options
+
+Access the unified exporter from **File > Export > Nod Export (.nod, .nad)**. Switch between **Model (`.nod`)** and **Animation (`.nad`)** using the format toggle at the top of the export panel (or by typing `.nod` / `.nad` in the file name):
+
+### Model (`.nod`)
+- **Selected Objects Only** (`selected_only`): Export only selected mesh objects and their associated armature (default: `False`).
+- **Export Bones & Skinning** (`export_bones`): Export the armature skeleton and vertex skin weights; disable to export as a static prop (default: `True`).
+- **Preserve Imported NOD Bind Pose** (`preserve_imported_bind_pose`): Use original `RestMatrixInverse` matrices stored on imported NOD bones for 100% compatibility with existing game `.nad` animations (default: `True`).
+
+### Animation (`.nad`)
+- **Export All Actions to Folder** (`export_all_actions`): Export every Action in the `.blend` file to the target directory as `<action_name>.nad` (default: `False`).
+- **Smooth Hermite Tangents** (`use_smooth_tangents`): Compute smooth Catmull-Rom Hermite curve fitting factors (`a`, `b`, `c`) between keyframes (default: `True`).
+- **Frame Step** (`frame_step`): Keyframing step in frames when sampling the Blender Action (default: `1`).
+
 ## Development & Testing
 
 ### Running Unit Tests
@@ -82,12 +96,8 @@ Reverse-engineering specifications and HTML documentation can be found in the `D
 
 ## Limitations
 
-- **Import only:** Exporting Blender models back to NOD/NAD format is not supported.
+- Progressive-mesh LOD collapse table (`HASLOD`) generation is not computed on export (models are exported at full resolution).
 - Unhandled format variations or edge cases from unofficial game modifications may require further adjustments.
-
-## TODO
-
-- Exporting models and animations back to `.nod` / `.nad` format.
 
 ## License
 

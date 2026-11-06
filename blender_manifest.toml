@@ -1,8 +1,8 @@
 schema_version = "1.0.0"
 id = "nod_import"
-version = "0.1.0"
-name = "VTM Redemption NOD Importer"
-tagline = "Import Vampire The Masquerade Redemption NOD models & animations"
+version = "0.2.0"
+name = "VTM Redemption NOD Importer/Exporter"
+tagline = "Import and export VTM Redemption NOD models and NAD animations"
 maintainer = "RK"
 type = "add-on"
 blender_version_min = "5.2.0"
@@ -10,7 +10,7 @@ license = ["SPDX:GPL-3.0-or-later"]
 tags = ["Import-Export", "Animation"]
 
 [permissions]
-files = "Read NOD, NAD, NMS and texture files from disk"
+files = "Read and write NOD, NAD, NMS and texture files on disk"
 
 [build]
 paths_exclude_pattern = [
