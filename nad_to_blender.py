@@ -6,7 +6,11 @@ import bpy
 from mathutils import Euler, Matrix, Quaternion, Vector
 
 from .nad_file import NadFile
-from .nod_math import matrix_to_nod_rest_matrix_inverse, nod_bind_world_matrix
+from .nod_math import (
+    matrix_to_nod_rest_matrix_inverse,
+    nod_bind_world_matrix,
+    order_blender_bones,
+)
 from .vector3 import Vector3
 from .vector4 import Vector4
 from .debug_logging import debug_print
@@ -56,26 +60,29 @@ def reconstruct_nod_bones_from_armature(armature_obj):
     if armature_obj is None or armature_obj.type != 'ARMATURE':
         raise ValueError("A Blender armature object is required")
 
-    bones = armature_obj.data.bones
-    bone_count = len(bones)
+    ordered_bones = order_blender_bones(armature_obj)
+    bone_count = len(ordered_bones)
     if bone_count == 0:
         raise ValueError(f"Armature '{armature_obj.name}' has no bones")
 
-    reconstructed = []
-    for index in range(bone_count):
-        bone_name = f"Bone_{index:03d}"
-        bone = bones.get(bone_name)
-        if bone is None:
-            raise ValueError(
-                f"Armature '{armature_obj.name}' is missing expected NOD bone '{bone_name}'"
-            )
+    bone_name_to_index = {b.name: i for i, b in enumerate(ordered_bones)}
+    arm_world = armature_obj.matrix_world.copy()
+    is_arm_identity = all(
+        abs(arm_world[r][c] - (1.0 if r == c else 0.0)) < 1e-6
+        for r in range(4)
+        for c in range(4)
+    )
 
-        if "nod_parent_id" in bone:
+    reconstructed = []
+    bind_world_mats = []
+    for index, bone in enumerate(ordered_bones):
+        if bone.parent is not None and bone.parent.name in bone_name_to_index:
+            parent_id = bone_name_to_index[bone.parent.name]
+            if not (0 <= parent_id < bone_count and parent_id != index):
+                parent_id = -1
+        elif "nod_parent_id" in bone:
             parent_id = int(bone["nod_parent_id"])
-        elif bone.parent is not None and bone.parent.name.startswith("Bone_"):
-            try:
-                parent_id = int(bone.parent.name.split("_", 1)[1])
-            except ValueError:
+            if not (0 <= parent_id < bone_count and parent_id != index):
                 parent_id = -1
         else:
             parent_id = -1
@@ -88,17 +95,34 @@ def reconstruct_nod_bones_from_armature(armature_obj):
                 Vector4(vals[4], vals[5], vals[6], vals[7]),
                 Vector4(vals[8], vals[9], vals[10], vals[11]),
             ]
+            tmp_bone = _StoredNodBone(parent_id, rest_matrix_inverse)
+            bw = nod_bind_world_matrix(tmp_bone)
+            if not is_arm_identity:
+                bw = arm_world @ bw
+                rest_matrix_inverse = matrix_to_nod_rest_matrix_inverse(bw.inverted_safe())
+            bind_world_mats.append(bw)
         else:
-            inv_mat = bone.matrix_local.inverted_safe()
+            bw = bone.matrix_local.copy() if is_arm_identity else (arm_world @ bone.matrix_local)
+            bind_world_mats.append(bw)
+            inv_mat = bw.inverted_safe()
             rest_matrix_inverse = matrix_to_nod_rest_matrix_inverse(inv_mat)
 
-        raw_trans = bone.get("nod_rest_translate")
-        if raw_trans is not None and len(raw_trans) == 3:
-            rest_translate = Vector3(float(raw_trans[0]), float(raw_trans[1]), float(raw_trans[2]))
-        else:
-            rest_translate = Vector3(0.0, 0.0, 0.0)
+        reconstructed.append(_StoredNodBone(parent_id, rest_matrix_inverse))
 
-        reconstructed.append(_StoredNodBone(parent_id, rest_matrix_inverse, rest_translate))
+    for index, bone in enumerate(ordered_bones):
+        nb = reconstructed[index]
+        raw_trans = bone.get("nod_rest_translate")
+        if raw_trans is not None and len(raw_trans) == 3 and is_arm_identity:
+            nb.rest_translate = Vector3(float(raw_trans[0]), float(raw_trans[1]), float(raw_trans[2]))
+        else:
+            p_id = nb.parent_id
+            if 0 <= p_id < bone_count:
+                local_mat = bind_world_mats[p_id].inverted_safe() @ bind_world_mats[index]
+            else:
+                local_mat = bind_world_mats[index]
+            t = local_mat.to_translation()
+            nb.rest_translate = Vector3(float(t.x), float(t.y), float(t.z))
+
     return reconstructed
 
 
@@ -248,6 +272,7 @@ def import_nad_animation(nad_file, armature_obj, nod_bones=None,
     armature_obj.animation_data.action = action
     armature_obj.data.pose_position = 'POSE'
 
+    ordered_bones = order_blender_bones(armature_obj)
     tracks = {(track.bone_num, track.track_type): track
               for track in nad_file.bone_tracks
               if 0 <= track.bone_num < len(nod_bones) and track.keys}
@@ -255,8 +280,8 @@ def import_nad_animation(nad_file, armature_obj, nod_bones=None,
     source_bind_world = _nod_bind_world_matrices(nod_bones)
     source_local_bind = _local_bind_matrices(nod_bones, source_bind_world)
     target_bind_world = [
-        armature_obj.data.bones[f"Bone_{index:03d}"].matrix_local.copy()
-        for index in range(len(nod_bones))
+        b.matrix_local.copy()
+        for b in ordered_bones
     ]
 
     samples = [{"location": [], "rotation_quaternion": [], "scale": []}
@@ -291,7 +316,7 @@ def import_nad_animation(nad_file, armature_obj, nod_bones=None,
             samples[index]["scale"].append(tuple(scale))
 
     for index, bone_samples in enumerate(samples):
-        bone_name = f"Bone_{index:03d}"
+        bone_name = ordered_bones[index].name
         armature_obj.pose.bones[bone_name].rotation_mode = 'QUATERNION'
         for property_name, channel_count in (
                 ("location", 3), ("rotation_quaternion", 4), ("scale", 3)):

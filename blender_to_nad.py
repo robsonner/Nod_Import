@@ -15,6 +15,7 @@ from .nad_to_blender import (
     _nod_bind_world_matrices,
     reconstruct_nod_bones_from_armature,
 )
+from .nod_math import order_blender_bones
 
 _TAG_NAME_TO_ID = {name.lower(): tag_id for tag_id, name in NAD_TAG_NAMES.items()}
 _MARKER_RE = re.compile(r"^(?:NAD_)?([A-Za-z0-9_]+?)(?:_\d+)?$")
@@ -149,11 +150,12 @@ def build_nad_from_action(
     if nod_bones is None:
         nod_bones = reconstruct_nod_bones_from_armature(armature_obj)
 
+    ordered_bones = order_blender_bones(armature_obj)
     bone_count = len(nod_bones)
-    if bone_count != len(armature_obj.data.bones):
+    if bone_count != len(ordered_bones):
         raise ValueError(
             f"NOD bone count ({bone_count}) does not match Blender armature "
-            f"bone count ({len(armature_obj.data.bones)})"
+            f"bone count ({len(ordered_bones)})"
         )
 
     # Determine frame range
@@ -168,14 +170,19 @@ def build_nad_from_action(
     if f_end < f_start:
         f_end = f_start
 
+    frame_span = max(0, f_end - f_start)
     stored_duration = action.get("nad_duration")
     if stored_duration is not None:
         try:
-            duration = float(stored_duration)
+            stored_val = float(stored_duration)
+            if int(round(stored_val)) == frame_span:
+                duration = stored_val
+            else:
+                duration = float(frame_span)
         except (TypeError, ValueError):
-            duration = float(max(0, f_end - f_start))
+            duration = float(frame_span)
     else:
-        duration = float(max(0, f_end - f_start))
+        duration = float(frame_span)
 
     step = max(1, int(frame_step))
     sample_blender_frames = list(range(f_start, f_end + 1, step))
@@ -189,8 +196,8 @@ def build_nad_from_action(
     rest_translations = [mat.to_translation() for mat in source_local_bind]
 
     target_bind_world_inv = [
-        armature_obj.data.bones[f"Bone_{i:03d}"].matrix_local.inverted_safe()
-        for i in range(bone_count)
+        b.matrix_local.inverted_safe()
+        for b in ordered_bones
     ]
 
     rot_samples = [[] for _ in range(bone_count)]
@@ -200,24 +207,38 @@ def build_nad_from_action(
 
     scene = context.scene
     orig_frame = scene.frame_current
+    orig_pose_position = armature_obj.data.pose_position
     armature_obj.animation_data_create()
     anim_data = armature_obj.animation_data
     orig_action = anim_data.action
     orig_slot = getattr(anim_data, "action_slot", None)
+    orig_use_nla = getattr(anim_data, "use_nla", False)
 
     try:
+        armature_obj.data.pose_position = 'POSE'
+        if hasattr(anim_data, "use_nla") and orig_use_nla:
+            anim_data.use_nla = False
         anim_data.action = action
         if hasattr(anim_data, "action_slot") and getattr(action, "slots", None):
-            if anim_data.action_slot is None or anim_data.action_slot not in list(action.slots):
-                anim_data.action_slot = action.slots[0]
+            suitable = list(
+                getattr(anim_data, "action_suitable_slots", None)
+                or [
+                    s
+                    for s in action.slots
+                    if getattr(s, "target_id_type", "OBJECT") in ("OBJECT", "UNSPECIFIED")
+                ]
+            )
+            if anim_data.action_slot is None or anim_data.action_slot not in suitable:
+                if suitable:
+                    anim_data.action_slot = suitable[0]
 
         for bf in sample_blender_frames:
             scene.frame_set(bf)
             pose_bones = armature_obj.pose.bones
 
             source_pose_world = []
-            for i in range(bone_count):
-                pb = pose_bones[f"Bone_{i:03d}"]
+            for i, b in enumerate(ordered_bones):
+                pb = pose_bones[b.name]
                 target_pose = pb.matrix
                 deformation = target_pose @ target_bind_world_inv[i]
                 source_pose_world.append(deformation @ source_bind_world[i])
@@ -248,8 +269,11 @@ def build_nad_from_action(
                 trans_samples[i].append((float(offset_t.x), float(offset_t.y), float(offset_t.z)))
                 scale_samples[i].append((float(scl.x), float(scl.y), float(scl.z)))
     finally:
+        armature_obj.data.pose_position = orig_pose_position
+        if hasattr(anim_data, "use_nla"):
+            anim_data.use_nla = orig_use_nla
         anim_data.action = orig_action
-        if hasattr(anim_data, "action_slot") and orig_slot is not None:
+        if hasattr(anim_data, "action_slot"):
             try:
                 anim_data.action_slot = orig_slot
             except Exception:

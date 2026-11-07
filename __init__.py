@@ -2,7 +2,7 @@ bl_info = {
     "name": "VTM Redemption NOD Importer/Exporter",
     "description": "Imports and exports Vampire: The Masquerade - Redemption NOD models and NAD animations",
     "author": "RK",
-    "version": (0, 2, 0),
+    "version": (1, 0, 0),
     "blender": (5, 2, 0),
     "location": "File > Import / Export > Nod (.nod, .nad, .nms)",
     "category": "Import-Export",

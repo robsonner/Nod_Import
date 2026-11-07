@@ -225,9 +225,17 @@ class NodFileExport(Operator, ExportHelper):
                 nod_bones = reconstruct_nod_bones_from_armature(armature_obj)
                 if self.export_all_actions:
                     out_dir = os.path.dirname(filepath) or "."
-                    actions = list(bpy.data.actions)
+                    actions = [
+                        act
+                        for act in bpy.data.actions
+                        if not getattr(act, "slots", None)
+                        or any(
+                            getattr(s, "target_id_type", "OBJECT") in ("OBJECT", "UNSPECIFIED")
+                            for s in act.slots
+                        )
+                    ]
                     if not actions:
-                        self.report({'ERROR'}, "No Actions found in blend file to export")
+                        self.report({'ERROR'}, "No compatible object Actions found in blend file to export")
                         return {'CANCELLED'}
                     exported_count = 0
                     for act in actions:

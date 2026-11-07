@@ -10,7 +10,11 @@ from .export_settings import ExportSettings
 from .nod_bone import NodBone
 from .nod_face import NodFace
 from .nod_file import NodFile
-from .nod_math import matrix_to_nod_rest_matrix_inverse, nod_bind_world_matrix
+from .nod_math import (
+    matrix_to_nod_rest_matrix_inverse,
+    nod_bind_world_matrix,
+    order_blender_bones,
+)
 from .nod_mesh_group import NodMeshGroup
 from .nod_skinning import (
     NOD_GROUP_KNOWN_FLAGS,
@@ -124,44 +128,7 @@ def collect_export_targets(context, settings: ExportSettings):
     return armature_obj, mesh_objects
 
 
-def _order_blender_bones(armature_obj):
-    bones = list(armature_obj.data.bones)
-    if not bones:
-        return []
-
-    # Check if bones follow standard Bone_000 .. Bone_{N-1:03d} naming
-    indexed = {}
-    all_standard = True
-    for b in bones:
-        m = _BONE_INDEX_RE.match(b.name)
-        if m:
-            idx = int(m.group(1))
-            indexed[idx] = b
-        else:
-            all_standard = False
-            break
-
-    if all_standard and set(indexed.keys()) == set(range(len(bones))):
-        return [indexed[i] for i in range(len(bones))]
-
-    # Otherwise topological pre-order traversal starting from roots
-    ordered = []
-    visited = set()
-
-    def _visit(b):
-        if b.name in visited:
-            return
-        visited.add(b.name)
-        ordered.append(b)
-        for child in b.children:
-            _visit(child)
-
-    roots = [b for b in bones if b.parent is None]
-    for r in roots:
-        _visit(r)
-    for b in bones:
-        _visit(b)
-    return ordered
+_order_blender_bones = order_blender_bones
 
 
 def _export_bones(armature_obj, settings: ExportSettings):
@@ -183,12 +150,14 @@ def _export_bones(armature_obj, settings: ExportSettings):
     children_by_parent = defaultdict(list)
 
     for i, b in enumerate(ordered_bones):
-        if "nod_parent_id" in b and settings.preserve_imported_bind_pose:
+        if b.parent is not None and b.parent.name in bone_name_to_index:
+            p_id = bone_name_to_index[b.parent.name]
+            if not (0 <= p_id < bone_count and p_id != i):
+                p_id = -1
+        elif "nod_parent_id" in b and settings.preserve_imported_bind_pose and b.parent is not None:
             p_id = int(b["nod_parent_id"])
             if not (0 <= p_id < bone_count and p_id != i):
                 p_id = -1
-        elif b.parent is not None and b.parent.name in bone_name_to_index:
-            p_id = bone_name_to_index[b.parent.name]
         else:
             p_id = -1
 
@@ -209,6 +178,11 @@ def _export_bones(armature_obj, settings: ExportSettings):
         nod_bones[child_indices[-1]].sibling_id = -1
 
     arm_world = armature_obj.matrix_world.copy()
+    is_arm_identity = all(
+        abs(arm_world[r][c] - (1.0 if r == c else 0.0)) < 1e-6
+        for r in range(4)
+        for c in range(4)
+    )
     world_bind_matrices = []
 
     for i, b in enumerate(ordered_bones):
@@ -221,7 +195,11 @@ def _export_bones(armature_obj, settings: ExportSettings):
                 Vector4(vals[4], vals[5], vals[6], vals[7]),
                 Vector4(vals[8], vals[9], vals[10], vals[11]),
             ]
-            world_bind_matrices.append(nod_bind_world_matrix(nb))
+            bw = nod_bind_world_matrix(nb)
+            if not is_arm_identity:
+                bw = arm_world @ bw
+                nb.rest_matrix_inverse = matrix_to_nod_rest_matrix_inverse(bw.inverted_safe())
+            world_bind_matrices.append(bw)
         else:
             bw = arm_world @ b.matrix_local
             world_bind_matrices.append(bw)
@@ -231,7 +209,7 @@ def _export_bones(armature_obj, settings: ExportSettings):
     for i, b in enumerate(ordered_bones):
         nb = nod_bones[i]
         raw_trans = b.get("nod_rest_translate") if settings.preserve_imported_bind_pose else None
-        if raw_trans is not None and len(raw_trans) == 3:
+        if raw_trans is not None and len(raw_trans) == 3 and is_arm_identity:
             nb.rest_translate = Vector3(float(raw_trans[0]), float(raw_trans[1]), float(raw_trans[2]))
         else:
             p_id = nb.parent_id
@@ -333,6 +311,8 @@ def build_nod_from_blender(
         raw_name = mesh_obj.get("nod_mesh_name") or _strip_blender_suffix(mesh_obj.name)
         clean_name = (raw_name or "mesh").split("\x00", 1)[0].strip() or "mesh"
         if clean_name not in mesh_name_to_id:
+            if len(nod.mesh_names) >= 256:
+                raise ValueError("NOD format supports at most 256 unique mesh names")
             mesh_name_to_id[clean_name] = len(nod.mesh_names)
             nod.mesh_names.append(clean_name)
         return mesh_name_to_id[clean_name]
@@ -347,6 +327,7 @@ def build_nod_from_blender(
         mesh_num = _get_or_add_mesh_id(mesh_obj)
         world_mat = mesh_obj.matrix_world.copy()
         normal_mat = world_mat.to_3x3().inverted_safe().transposed()
+        flip_winding = world_mat.determinant() < 0.0
         is_identity_xform = all(
             abs(world_mat[r][c] - (1.0 if r == c else 0.0)) < 1e-6
             for r in range(4)
@@ -470,6 +451,8 @@ def build_nod_from_blender(
                     else:
                         uv_val = (0.0, 0.0)
                         n_v = mesh.vertices[v_idx].normal
+                        if not is_identity_xform:
+                            n_v = (normal_mat @ n_v).normalized()
                         norm_val = (float(n_v.x), float(n_v.y), float(n_v.z))
                     _find_or_create_local_vert(v_idx, uv_val, norm_val)
 
@@ -478,6 +461,8 @@ def build_nod_from_blender(
                     _find_or_create_local_vert(v_idx, loop_uvs[l_idx], loop_normals[l_idx])
                     for v_idx, l_idx in zip(tri.vertices, tri.loops)
                 ]
+                if flip_winding:
+                    face_indices = [face_indices[0], face_indices[2], face_indices[1]]
                 group_faces.append(NodFace(x=face_indices[0], y=face_indices[1], z=face_indices[2]))
 
             if len(group_verts) > MAX_GROUP_VERTICES:
@@ -500,10 +485,16 @@ def build_nod_from_blender(
 
             stored_flags = mesh_obj.get("nod_group_flags")
             stored_bone = mesh_obj.get("nod_group_bone_num")
+            has_soft = any(gv.weight < 1.0 - 1e-5 for gv in group_verts)
             if len(nod_bones) == 0:
                 grp.group_flags = NOD_GROUP_NOSKINNING
                 grp.bone_num = 0
-            elif stored_flags is not None and (int(stored_flags) & ~NOD_GROUP_KNOWN_FLAGS) == 0:
+            elif (
+                single_mat_group
+                and stored_flags is not None
+                and (int(stored_flags) & ~NOD_GROUP_KNOWN_FLAGS) == 0
+                and not (has_soft and (int(stored_flags) & NOD_GROUP_NOWEIGHTS))
+            ):
                 grp.group_flags = int(stored_flags)
                 grp.bone_num = int(stored_bone) if stored_bone is not None else 0
                 if grp.group_flags & NOD_GROUP_NOSKINNING:
@@ -511,7 +502,6 @@ def build_nod_from_blender(
                         gv.bone_number = grp.bone_num
                         gv.weight = 1.0
             else:
-                has_soft = any(gv.weight < 1.0 - 1e-5 for gv in group_verts)
                 grp.group_flags = 0 if has_soft else NOD_GROUP_NOWEIGHTS
                 grp.bone_num = int(stored_bone) if stored_bone is not None else 0
 

@@ -1,5 +1,57 @@
+import re
 from mathutils import Matrix, Vector
 from .vector4 import Vector4
+
+_BONE_INDEX_RE = re.compile(r"^Bone_(\d+)$")
+
+
+def order_blender_bones(armature_obj):
+    """Return armature bones in NOD index order (Bone_000..N-1 or topological pre-order)."""
+    bones = list(armature_obj.data.bones)
+    if not bones:
+        return []
+
+    indexed = {}
+    all_standard = True
+    for b in bones:
+        m = _BONE_INDEX_RE.match(b.name)
+        if m:
+            idx = int(m.group(1))
+            indexed[idx] = b
+        else:
+            all_standard = False
+            break
+
+    if all_standard and set(indexed.keys()) == set(range(len(bones))):
+        ordered_std = [indexed[i] for i in range(len(bones))]
+        name_to_idx = {b.name: i for i, b in enumerate(ordered_std)}
+        topo_valid = (
+            ordered_std[0].parent is None
+            and all(
+                b.parent is None or name_to_idx.get(b.parent.name, -1) < i
+                for i, b in enumerate(ordered_std)
+            )
+        )
+        if topo_valid:
+            return ordered_std
+
+    ordered = []
+    visited = set()
+
+    def _visit(b):
+        if b.name in visited:
+            return
+        visited.add(b.name)
+        ordered.append(b)
+        for child in b.children:
+            _visit(child)
+
+    roots = [b for b in bones if b.parent is None]
+    for r in roots:
+        _visit(r)
+    for b in bones:
+        _visit(b)
+    return ordered
 
 
 def nod_inverse_bind_matrix(nod_bone) -> Matrix:
