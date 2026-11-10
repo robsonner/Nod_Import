@@ -87,7 +87,7 @@ def add_uv(mesh, uvs):
     uv_layer.data.foreach_set("uv", flat_uvs)
 
 
-def create_material(materialName: str, texturePath: str, dir_cache: dict = None) -> bpy.types.Material:
+def create_material(materialName: str, texturePath, dir_cache: dict = None) -> bpy.types.Material:
     material = bpy.data.materials.new(name=materialName)
     material["nod_source_name"] = materialName
 
@@ -100,42 +100,50 @@ def create_material(materialName: str, texturePath: str, dir_cache: dict = None)
             output_node = material.node_tree.nodes.new(type='ShaderNodeOutputMaterial')
         material.node_tree.links.new(bsdf_node.outputs['BSDF'], output_node.inputs['Surface'])
 
-    if not texturePath or not str(texturePath).strip():
+    if isinstance(texturePath, (list, tuple)):
+        candidate_dirs = [str(p).strip() for p in texturePath if p and str(p).strip()]
+    elif texturePath and str(texturePath).strip():
+        candidate_dirs = [str(texturePath).strip()]
+    else:
+        candidate_dirs = []
+
+    if not candidate_dirs:
         debug_print(f"No textures directory specified for material '{materialName}'.")
         return material
 
-    directory = bpy.path.abspath(texturePath)
-    if not os.path.isdir(directory):
-        debug_print(f"Textures directory '{directory}' does not exist for material '{materialName}'.")
-        return material
+    if dir_cache is None:
+        dir_cache = {}
 
     target_filename = materialName + ".tga"
-    exact_path = os.path.join(directory, target_filename)
+    lower_target = target_filename.lower()
     found_path = None
 
-    if os.path.isfile(exact_path):
-        found_path = exact_path
-    else:
-        if dir_cache is None:
-            dir_cache = {}
+    for raw_dir in candidate_dirs:
+        directory = bpy.path.abspath(raw_dir)
+        if not os.path.isdir(directory):
+            continue
+        exact_path = os.path.join(directory, target_filename)
+        if os.path.isfile(exact_path):
+            found_path = exact_path
+            break
         if directory not in dir_cache:
             try:
                 dir_cache[directory] = {f.lower(): f for f in os.listdir(directory)}
             except OSError:
                 dir_cache[directory] = {}
-        lower_target = target_filename.lower()
         matched_filename = dir_cache[directory].get(lower_target)
         if matched_filename:
             candidate_path = os.path.join(directory, matched_filename)
             if os.path.isfile(candidate_path):
                 found_path = candidate_path
+                break
 
     if found_path:
         texture_node = material.node_tree.nodes.new(type='ShaderNodeTexImage')
         texture_node.image = bpy.data.images.load(filepath=found_path, check_existing=True)
         material.node_tree.links.new(texture_node.outputs['Color'], bsdf_node.inputs['Base Color'])
     else:
-        debug_print(f"Texture with filepath '{exact_path}' for material '{materialName}' does not exist.")
+        debug_print(f"Texture '{target_filename}' for material '{materialName}' not found in {candidate_dirs}.")
 
     return material
 

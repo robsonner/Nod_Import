@@ -31,7 +31,7 @@ def load_nms(filepath):
 
 
 def find_nms_for_nod(nod_path, nms_path=""):
-    """Use an explicit NMS path or find <model>.nms beside the NOD file or in ../Motions / ../Anims."""
+    """Use an explicit NMS path or find <model>.nms by priority: 1) .nod folder, 2) Motions/, 3) ../Motions/."""
     if nms_path:
         explicit_path = os.path.abspath(nms_path)
         return explicit_path if os.path.isfile(explicit_path) else None
@@ -40,10 +40,8 @@ def find_nms_for_nod(nod_path, nms_path=""):
     nod_directory = os.path.dirname(os.path.abspath(nod_path))
     candidate_dirs = [
         nod_directory,
-        os.path.normpath(os.path.join(nod_directory, "..", "Motions")),
-        os.path.normpath(os.path.join(nod_directory, "..", "Anims")),
         os.path.join(nod_directory, "Motions"),
-        os.path.join(nod_directory, "Anims"),
+        os.path.normpath(os.path.join(nod_directory, "..", "Motions")),
     ]
     for cand_dir in candidate_dirs:
         if not os.path.isdir(cand_dir):
@@ -59,24 +57,30 @@ def find_nms_for_nod(nod_path, nms_path=""):
     return None
 
 
-def resolve_nms_animations(nms_path, animation_directory):
-    """Resolve NMS NAD names case-insensitively across candidate animation directories."""
+def resolve_nms_animations(nms_path, animation_directory="", explicit_anim_dir=False):
+    """Resolve NMS NAD names case-insensitively across candidate animation directories.
+
+    When ``explicit_anim_dir`` is True and ``animation_directory`` is provided,
+    search only in ``animation_directory``.
+    Otherwise search in priority order relative to ``animation_directory`` (the .nod folder):
+    1) .nod folder, 2) Anims/, 3) ../Anims/.
+    """
     motions = load_nms(nms_path)
     nms_dir = os.path.dirname(os.path.abspath(nms_path))
-    anim_dir = os.path.abspath(animation_directory) if animation_directory else nms_dir
+    base_dir = os.path.abspath(animation_directory) if animation_directory else nms_dir
 
     candidate_dirs = []
-    for d in (
-        anim_dir,
-        nms_dir,
-        os.path.normpath(os.path.join(nms_dir, "..", "Anims")),
-        os.path.join(nms_dir, "Anims"),
-        os.path.normpath(os.path.join(anim_dir, "..", "Anims")),
-        os.path.join(anim_dir, "Anims"),
-    ):
-        norm_d = os.path.normcase(os.path.abspath(d))
-        if norm_d not in {os.path.normcase(x) for x in candidate_dirs}:
-            candidate_dirs.append(os.path.abspath(d))
+    if explicit_anim_dir and animation_directory:
+        candidate_dirs.append(base_dir)
+    else:
+        for d in (
+            base_dir,
+            os.path.join(base_dir, "Anims"),
+            os.path.normpath(os.path.join(base_dir, "..", "Anims")),
+        ):
+            norm_d = os.path.normcase(os.path.abspath(d))
+            if norm_d not in {os.path.normcase(x) for x in candidate_dirs}:
+                candidate_dirs.append(os.path.abspath(d))
 
     directory_files = {}
     scanned_any = False

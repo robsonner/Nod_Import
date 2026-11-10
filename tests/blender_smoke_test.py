@@ -101,10 +101,11 @@ def main():
             assert armature_obj1.animation_data.action is not None
             print(f"Run 1b passed: loaded action '{armature_obj1.animation_data.action.name}' onto existing armature.")
 
-        # Run 2: default (with animations)
-        print("\n--- Test Run 2: default (with animation) ---")
+        # Run 2: with single animation path
+        print("\n--- Test Run 2: with animation_path ---")
         clear_scene_data()
-        result2 = bpy.ops.nod_import.data(filepath=nod_file)
+        anim_kw = {"animation_path": str(sample_nads[0]), "use_nms": False} if sample_nads else {}
+        result2 = bpy.ops.nod_import.data(filepath=nod_file, **anim_kw)
         assert result2 == {"FINISHED"}, f"Run 2 operator failed with {result2}"
         armature_obj, meshes = verify_armature_and_meshes(expected_bones)
 
@@ -121,7 +122,7 @@ def main():
             )
 
         print(
-            f"Run 2 passed: {action_count} actions loaded, active action "
+            f"Run 2 passed: {action_count} action(s) loaded, active action "
             f"'{anim_data.action.name}' with slot verified."
         )
 
@@ -143,7 +144,6 @@ def main():
             res_reimp = bpy.ops.nod_import.data(
                 filepath=out_nod,
                 use_nms=False,
-                load_all_animations=False,
                 animation_path=out_nad,
             )
             assert res_reimp == {"FINISHED"}, f"Round-trip re-import failed with {res_reimp}"

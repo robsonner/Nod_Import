@@ -46,13 +46,13 @@ The importer exposes the following settings when importing a `.nod` model:
 
 ### Animation
 - **Load NAD Animation** (`load_animation`): Import NAD animations onto the imported armature (default: `True`).
-- **Use NMS Motion Set** (`use_nms`): Use an NMS motion set to select animations; when no path is provided, searches for `<model name>.nms` beside the NOD file (default: `True`).
-- **NMS Motion Set** (`nms_path`): Optional file path override for the `.nms` motion set file.
-- **Load All Matching NAD Animations** (`load_all_animations`): When NMS is disabled or unavailable, loads every `<NOD name>_*.nad` file from the animation directory as a separate Action (default: `True`).
-- **NAD Animation** (`animation_path`): File path override for a specific `.nad` animation file; leave empty to auto-detect matching files.
+- **Use NMS Motion Set** (`use_nms`): Load animations defined in an `.nms` motion set; disable to load a single `.nad` file instead (default: `True`).
+- **NMS Motion Set** (`nms_path`): Optional `.nms` file path or filename. Leave empty to auto-search `<model>.nms` by priority: `1) .nod folder`, `2) Motions/`, `3) ../Motions/` (active when `Use NMS Motion Set` is enabled).
+- **Animations Folder** (`nms_anims_dir`): Optional folder with `.nad` files for NMS. Leave empty to auto-search each `.nad` by priority: `1) .nod folder`, `2) Anims/`, `3) ../Anims/` (active when `Use NMS Motion Set` is enabled or when importing a `.nms` file).
+- **NAD Animation** (`animation_path`): Single `.nad` file path (or filename inside the `.nod` folder) to load. If left empty, no animation is loaded (active when `Use NMS Motion Set` is disabled).
 
 ### Materials
-- **Textures path** (`textures_path`): Directory path for textures; leave empty to search `Materials/`, `../Materials/`, or the NOD file directory.
+- **Textures Folder** (`textures_path`): Optional folder with `.tga` textures. Leave empty to auto-search each texture by priority: `1) .nod folder`, `2) Materials/`, `3) ../Materials/`.
 
 ### Diagnostics
 - **Debug Logging** (`debug_log`): Print detailed mesh, skeleton, and animation diagnostic messages to the console (default: `False`).
