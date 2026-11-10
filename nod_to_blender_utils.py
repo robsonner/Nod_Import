@@ -87,6 +87,64 @@ def add_uv(mesh, uvs):
     uv_layer.data.foreach_set("uv", flat_uvs)
 
 
+def _find_file_in_dirs(target_filename: str, candidate_dirs: list, dir_cache: dict):
+    lower_target = target_filename.lower()
+    for raw_dir in candidate_dirs:
+        directory = bpy.path.abspath(raw_dir)
+        if not os.path.isdir(directory):
+            continue
+        exact_path = os.path.join(directory, target_filename)
+        if os.path.isfile(exact_path):
+            return exact_path
+        if directory not in dir_cache:
+            try:
+                dir_cache[directory] = {f.lower(): f for f in os.listdir(directory)}
+            except OSError:
+                dir_cache[directory] = {}
+        matched_filename = dir_cache[directory].get(lower_target)
+        if matched_filename:
+            candidate_path = os.path.join(directory, matched_filename)
+            if os.path.isfile(candidate_path):
+                return candidate_path
+    return None
+
+
+def _parse_nam_file(nam_path: str) -> dict:
+    """Parse a Nihilistic Animated Material (.nam) ASCII file for texture, twosided, and masked flags."""
+    info = {
+        "texture": None,
+        "twosided": False,
+        "masked": False,
+    }
+    try:
+        with open(nam_path, "r", encoding="cp1252", errors="replace") as stream:
+            for raw_line in stream:
+                line = raw_line.split(";", 1)[0].split("//", 1)[0].strip()
+                if not line:
+                    continue
+                tokens = line.split()
+                kw = tokens[0].lower()
+                if kw == "texture" and len(tokens) >= 2 and info["texture"] is None:
+                    info["texture"] = tokens[1]
+                elif kw == "pass" and len(tokens) >= 4 and info["texture"] is None:
+                    tex_token = tokens[3] if tokens[2].lower() == "nomip" and len(tokens) >= 5 else tokens[2]
+                    if not tex_token.startswith("$"):
+                        info["texture"] = tex_token
+                elif kw == "twosided":
+                    info["twosided"] = True
+                elif kw == "masked":
+                    info["masked"] = True
+    except OSError as exc:
+        print(f"WARNING: Failed to read NAM file '{nam_path}': {exc}")
+    return info
+
+
+def _ensure_tga_ext(name: str) -> str:
+    if name.lower().endswith(".tga"):
+        return name
+    return name + ".tga"
+
+
 def create_material(materialName: str, texturePath, dir_cache: dict = None) -> bpy.types.Material:
     material = bpy.data.materials.new(name=materialName)
     material["nod_source_name"] = materialName
@@ -114,36 +172,52 @@ def create_material(materialName: str, texturePath, dir_cache: dict = None) -> b
     if dir_cache is None:
         dir_cache = {}
 
-    target_filename = materialName + ".tga"
-    lower_target = target_filename.lower()
-    found_path = None
+    twosided = False
+    masked = False
+    target_tga = _ensure_tga_ext(materialName)
 
-    for raw_dir in candidate_dirs:
-        directory = bpy.path.abspath(raw_dir)
-        if not os.path.isdir(directory):
-            continue
-        exact_path = os.path.join(directory, target_filename)
-        if os.path.isfile(exact_path):
-            found_path = exact_path
-            break
-        if directory not in dir_cache:
-            try:
-                dir_cache[directory] = {f.lower(): f for f in os.listdir(directory)}
-            except OSError:
-                dir_cache[directory] = {}
-        matched_filename = dir_cache[directory].get(lower_target)
-        if matched_filename:
-            candidate_path = os.path.join(directory, matched_filename)
-            if os.path.isfile(candidate_path):
-                found_path = candidate_path
-                break
+    # 1. Check for a .nam material definition file first (as per NOD Engine SDK nam.htm)
+    nam_path = _find_file_in_dirs(materialName + ".nam", candidate_dirs, dir_cache)
+    if nam_path:
+        nam_info = _parse_nam_file(nam_path)
+        twosided = nam_info["twosided"]
+        masked = nam_info["masked"]
+        if nam_info["texture"]:
+            target_tga = _ensure_tga_ext(nam_info["texture"])
+        debug_print(
+            f"Material '{materialName}': loaded NAM '{nam_path}' "
+            f"(texture='{target_tga}', twosided={twosided}, masked={masked})"
+        )
+
+    # 2. Search for the resolved .tga file
+    found_path = _find_file_in_dirs(target_tga, candidate_dirs, dir_cache)
+
+    # 3. Fallback: if neither .nam nor .tga resolved and material ends with '_dbl', strip '_dbl'
+    if not found_path and materialName.lower().endswith("_dbl") and len(materialName) > 4:
+        base_name = materialName[:-4]
+        fallback_tga = _ensure_tga_ext(base_name)
+        print(
+            f"WARNING: Material '{materialName}': '{target_tga}' (and '{materialName}.nam') not found; "
+            f"falling back to '{fallback_tga}' with two-sided rendering (stripped '_dbl' suffix)"
+        )
+        twosided = True
+        found_path = _find_file_in_dirs(fallback_tga, candidate_dirs, dir_cache)
+
+    material.use_backface_culling = not twosided
 
     if found_path:
         texture_node = material.node_tree.nodes.new(type='ShaderNodeTexImage')
         texture_node.image = bpy.data.images.load(filepath=found_path, check_existing=True)
         material.node_tree.links.new(texture_node.outputs['Color'], bsdf_node.inputs['Base Color'])
+
+        if masked:
+            math_node = material.node_tree.nodes.new(type='ShaderNodeMath')
+            math_node.operation = 'GREATER_THAN'
+            math_node.inputs[1].default_value = 0.5
+            material.node_tree.links.new(texture_node.outputs['Alpha'], math_node.inputs[0])
+            material.node_tree.links.new(math_node.outputs['Value'], bsdf_node.inputs['Alpha'])
     else:
-        debug_print(f"Texture '{target_filename}' for material '{materialName}' not found in {candidate_dirs}.")
+        debug_print(f"Texture '{target_tga}' for material '{materialName}' not found in {candidate_dirs}.")
 
     return material
 

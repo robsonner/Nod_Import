@@ -5,7 +5,7 @@ Blender 5.2+ extension and add-on for importing and exporting 3D models and skel
 ## Features
 
 - **Meshes & Geometry (Import & Export):** Multi-group geometry with UV texture coordinates, custom split normals, automatic triangulation, and UV/normal seam splitting on export.
-- **Materials & Textures:** Automatic material generation with Principled BSDF shader nodes and `.tga` texture lookup (supporting `Materials/`, `../Materials/`, or the NOD file directory).
+- **Materials & Textures:** Automatic material generation with Principled BSDF shader nodes, `.nam` (*Nihilistic Animated Material*) parsing (`Twosided`, `Masked` 1-bit alpha, texture redirection, and `_dbl` suffix fallback), and `.tga` texture lookup (`1) .nod folder`, `2) Materials/`, `3) ../Materials/`).
 - **Armature & Rigging (Import & Export):** Full skeleton generation and export (`<= 64` bones), true bind-pose transforms via `RestMatrixInverse` (with optional preservation of imported game bind poses for 100% compatibility with original `.nad` files), and soft/rigid vertex weight assignments.
 - **NAD Skeletal Animations (Import & Export):** Imports and exports `.nad` animation clips using Blender 5.2 layered animation and action slots, cubic Hermite curve interpolation (`a/b/c_factor`), and animation tag event markers (`pose_markers`).
 - **NMS Motion Sets:** Supports `.nms` motion set scripts to resolve and batch-import associated animation sets (searching `Anims/`, `../Anims/`, and `../Motions/`).
@@ -19,11 +19,11 @@ Blender 5.2+ extension and add-on for importing and exporting 3D models and skel
 ### (a) Installing from Extension ZIP
 1. In Blender, navigate to **Edit > Preferences > Get Extensions**.
 2. Click the menu dropdown in the top-right corner and select **Install from Disk...**.
-3. Choose `nod_import-1.0.0.zip` (located in the `dist/` directory).
+3. Choose `nod_import-1.0.1.zip` (located in the `dist/` directory).
 
 Alternatively, install via the Blender command-line interface:
 ```powershell
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --command extension install-file -r user_default -e dist\nod_import-1.0.0.zip
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --command extension install-file -r user_default -e dist\nod_import-1.0.1.zip
 ```
 
 ### (b) Building the Extension ZIP from Source
