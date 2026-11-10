@@ -19,11 +19,11 @@ Blender 5.2+ extension and add-on for importing and exporting 3D models and skel
 ### (a) Installing from Extension ZIP
 1. In Blender, navigate to **Edit > Preferences > Get Extensions**.
 2. Click the menu dropdown in the top-right corner and select **Install from Disk...**.
-3. Choose `nod_import-0.2.0.zip` (located in the `dist/` directory).
+3. Choose `nod_import-1.0.0.zip` (located in the `dist/` directory).
 
 Alternatively, install via the Blender command-line interface:
 ```powershell
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --command extension install-file -r user_default -e dist\nod_import-0.2.0.zip
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --command extension install-file -r user_default -e dist\nod_import-1.0.0.zip
 ```
 
 ### (b) Building the Extension ZIP from Source
@@ -43,7 +43,6 @@ The importer exposes the following settings when importing a `.nod` model:
 
 ### Skeleton
 - **Load Bones** (`load_bones`): Whether to load the armature skeleton and vertex groups (default: `True`).
-- **Use NOD Bind Positions** (`use_bind_pose_positions`): Place bone heads at joint pivots calculated from `RestMatrixInverse`. Disable to fallback to legacy weighted vertex centroids (default: `True`).
 
 ### Animation
 - **Load NAD Animation** (`load_animation`): Import NAD animations onto the imported armature (default: `True`).

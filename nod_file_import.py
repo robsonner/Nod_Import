@@ -454,13 +454,6 @@ class NodFileImport(Operator, ImportHelper):
         default=True,
     )
 
-    use_bind_pose_positions: BoolProperty(
-        name="Use NOD Bind Positions",
-        description=("Place bone heads at joint pivots from RestMatrixInverse; "
-                     "disable to use legacy weighted vertex centroids"),
-        default=True,
-    )
-
     load_animation: BoolProperty(
         name="Load NAD Animation",
         description="Import a NAD animation onto the imported armature",
@@ -550,9 +543,6 @@ class NodFileImport(Operator, ImportHelper):
         box = layout.box()
         box.label(text="Skeleton")
         box.prop(self, "load_bones")
-        sub_bones = box.column()
-        sub_bones.enabled = self.load_bones
-        sub_bones.prop(self, "use_bind_pose_positions")
 
         # Animation section
         box = layout.box()
@@ -613,7 +603,6 @@ class NodFileImport(Operator, ImportHelper):
             self.load_animation,
             self.animation_path,
             self.load_all_animations,
-            self.use_bind_pose_positions,
             self.use_nms,
             self.nms_path,
             self.debug_log,

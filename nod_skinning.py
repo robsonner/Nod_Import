@@ -142,7 +142,7 @@ def get_nod_bone_children(nod_bones, bone_index):
 
 def create_blender_skeleton_from_nod_with_mesh(
         nod_vertices, nod_bones, armature_name="NOD_Armature",
-        use_bind_pose_positions=False, collection=None):
+        collection=None):
     """
     Convert NOD bone structure to Blender armature.
     
@@ -150,7 +150,6 @@ def create_blender_skeleton_from_nod_with_mesh(
         nod_vertices: List of NodVertex objects
         nod_bones: List of NodBone objects
         armature_name: Name for the created armature
-        use_bind_pose_positions: Use bind pose positions or centroid positions
         collection: Target collection (defaults to bpy.context.collection)
     
     Returns:
@@ -166,63 +165,15 @@ def create_blender_skeleton_from_nod_with_mesh(
     for obj in bpy.context.view_layer.objects.selected:
         obj.select_set(False)
     
-    # FIRST: Calculate bone positions. Bind positions provide the actual joint
-    # pivots; the legacy mode retains weighted vertex centroids for comparison.
-    position_mode = ("NOD BIND POSE" if use_bind_pose_positions
-                     else "VERTEX WEIGHT CENTROIDS")
-    debug_print(f"=== CALCULATING BONE POSITIONS: {position_mode} ===")
-    bone_positions = {}
-    for i in range(len(nod_bones)):
-        bone_positions[i] = {"position": Vector((0, 0, 0)), "weight": 0}
-    
-    skipped_vertices_count = 0
-    num_bones = len(nod_bones)
-    for vertex in nod_vertices:
-        bone_index = vertex.bone_number
-        if not (0 <= bone_index < num_bones):
-            skipped_vertices_count += 1
-            continue
-
-        weight = vertex.weight
-        vertex_position = convert_to_mathutils_vector(vertex.position)
-        
-        # Accumulate weighted position for the bone
-        bone_positions[bone_index]["position"] += vertex_position * weight
-        bone_positions[bone_index]["weight"] += weight
-        
-        # If weight < 1.0, distribute to parent bone
-        if weight < 1.0:
-            nod_bone = nod_bones[bone_index]
-            parent_bone_index = nod_bone.parent_id
-            
-            if 0 <= parent_bone_index < num_bones:
-                bone_positions[parent_bone_index]["position"] += vertex_position * (1 - weight)
-                bone_positions[parent_bone_index]["weight"] += (1 - weight)
-    
-    debug_print(f"Centroid calculation: skipped {skipped_vertices_count} vertices with invalid bone_number")
-
-    # Calculate average positions for each bone
+    # FIRST: Calculate bone positions from NOD bind pose (RestMatrixInverse).
+    debug_print("=== CALCULATING BONE POSITIONS: NOD BIND POSE ===")
     bone_avg_positions = {}
-    for bone_index, data in bone_positions.items():
-        if use_bind_pose_positions:
-            bone_avg_positions[bone_index] = get_nod_bone_world_rest_position(
-                nod_bones[bone_index]
-            )
-            debug_print(f"Bone {bone_index}: absolute bind position = "
-                  f"{bone_avg_positions[bone_index]}")
-        elif data["weight"] > 0:
-            bone_avg_positions[bone_index] = data["position"] / data["weight"]
-            debug_print(f"Bone {bone_index}: avg position from vertices = {bone_avg_positions[bone_index]}")
-        else:
-            # RestTranslate is local to the parent and cannot be used directly
-            # as a Blender edit-bone head. For bones without any influences,
-            # recover only their absolute bind position from RestMatrixInverse.
-            nod_bone = nod_bones[bone_index]
-            bone_avg_positions[bone_index] = get_nod_bone_world_rest_position(
-                nod_bone
-            )
-            debug_print(f"Bone {bone_index}: no vertices, using absolute bind "
-                  f"position = {bone_avg_positions[bone_index]}")
+    for bone_index, nod_bone in enumerate(nod_bones):
+        bone_avg_positions[bone_index] = get_nod_bone_world_rest_position(
+            nod_bone
+        )
+        debug_print(f"Bone {bone_index}: absolute bind position = "
+              f"{bone_avg_positions[bone_index]}")
     
     # Calculate scale-dependent tail parameters from bounding box
     def compute_diagonal(points):
