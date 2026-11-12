@@ -14,6 +14,7 @@ from .nod_math import (
     matrix_to_nod_rest_matrix_inverse,
     nod_bind_world_matrix,
     order_blender_bones,
+    rigid_export_matrix,
 )
 from .nod_mesh_group import NodMeshGroup
 from .nod_skinning import (
@@ -185,6 +186,7 @@ def _export_bones(armature_obj, settings: ExportSettings):
     )
     world_bind_matrices = []
 
+    bind_scale_baked = False
     for i, b in enumerate(ordered_bones):
         nb = nod_bones[i]
         raw_inv = b.get("nod_rest_matrix_inverse") if settings.preserve_imported_bind_pose else None
@@ -206,10 +208,19 @@ def _export_bones(armature_obj, settings: ExportSettings):
             inv_bw = bw.inverted_safe()
             nb.rest_matrix_inverse = matrix_to_nod_rest_matrix_inverse(inv_bw)
 
+        rigid_bw = rigid_export_matrix(
+            bw, f"Bone '{b.name}' bind pose", allow_uniform_scale=True,
+        )
+        if any(abs(rigid_bw[r][c] - bw[r][c]) > 1e-6
+               for r in range(4) for c in range(4)):
+            bind_scale_baked = True
+            nb.rest_matrix_inverse = matrix_to_nod_rest_matrix_inverse(rigid_bw.inverted_safe())
+        world_bind_matrices[-1] = rigid_bw
+
     for i, b in enumerate(ordered_bones):
         nb = nod_bones[i]
         raw_trans = b.get("nod_rest_translate") if settings.preserve_imported_bind_pose else None
-        if raw_trans is not None and len(raw_trans) == 3 and is_arm_identity:
+        if raw_trans is not None and len(raw_trans) == 3 and is_arm_identity and not bind_scale_baked:
             nb.rest_translate = Vector3(float(raw_trans[0]), float(raw_trans[1]), float(raw_trans[2]))
         else:
             p_id = nb.parent_id
@@ -221,6 +232,11 @@ def _export_bones(armature_obj, settings: ExportSettings):
             nb.rest_translate = Vector3(float(t.x), float(t.y), float(t.z))
 
     return nod_bones, bone_name_to_index
+
+
+def reconstruct_export_bones(armature_obj):
+    """Use identical scale-free bind data for standalone NAD and NOD exports."""
+    return _export_bones(armature_obj, ExportSettings())[0]
 
 
 def _resolve_vertex_skinning(vertex, vgroup_idx_to_bone_idx, nod_bones):

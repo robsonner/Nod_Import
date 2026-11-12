@@ -6,16 +6,15 @@ from mathutils import Euler, Matrix, Vector
 
 from .debug_logging import debug_print, set_debug_logging
 from .nad_file import NadBoneTrack, NadFile, NadKeyframe, NadTag
+from .blender_to_nod import reconstruct_export_bones
 from .nad_to_blender import (
     NAD_TAG_NAMES,
     NAD_TRACK_ROTATION,
-    NAD_TRACK_SCALE,
     NAD_TRACK_TRANSLATION,
     _local_bind_matrices,
     _nod_bind_world_matrices,
-    reconstruct_nod_bones_from_armature,
 )
-from .nod_math import order_blender_bones
+from .nod_math import order_blender_bones, rigid_export_matrix
 
 _TAG_NAME_TO_ID = {name.lower(): tag_id for tag_id, name in NAD_TAG_NAMES.items()}
 _MARKER_RE = re.compile(r"^(?:NAD_)?([A-Za-z0-9_]+?)(?:_\d+)?$")
@@ -148,7 +147,7 @@ def build_nad_from_action(
         raise ValueError(f"Armature '{armature_obj.name}' has no active Action to export")
 
     if nod_bones is None:
-        nod_bones = reconstruct_nod_bones_from_armature(armature_obj)
+        nod_bones = reconstruct_export_bones(armature_obj)
 
     ordered_bones = order_blender_bones(armature_obj)
     bone_count = len(nod_bones)
@@ -195,14 +194,16 @@ def build_nad_from_action(
     source_local_bind = _local_bind_matrices(nod_bones, source_bind_world)
     rest_translations = [mat.to_translation() for mat in source_local_bind]
 
+    # Pose bones use armature space; exported binds/vertices use world space.
+    # Include object and delta transforms on both sides of the deformation.
+    reference_arm_world = armature_obj.matrix_world.copy()
     target_bind_world_inv = [
-        b.matrix_local.inverted_safe()
+        (reference_arm_world @ b.matrix_local).inverted_safe()
         for b in ordered_bones
     ]
 
     rot_samples = [[] for _ in range(bone_count)]
     trans_samples = [[] for _ in range(bone_count)]
-    scale_samples = [[] for _ in range(bone_count)]
     prev_eulers = [None] * bone_count
 
     scene = context.scene
@@ -239,7 +240,7 @@ def build_nad_from_action(
             source_pose_world = []
             for i, b in enumerate(ordered_bones):
                 pb = pose_bones[b.name]
-                target_pose = pb.matrix
+                target_pose = armature_obj.matrix_world @ pb.matrix
                 deformation = target_pose @ target_bind_world_inv[i]
                 source_pose_world.append(deformation @ source_bind_world[i])
 
@@ -250,7 +251,10 @@ def build_nad_from_action(
                 else:
                     local_pose = source_pose_world[i]
 
-                loc, quat, scl = local_pose.decompose()
+                local_pose = rigid_export_matrix(
+                    local_pose, f"Action '{action.name}', bone '{ordered_bones[i].name}', frame {bf}",
+                )
+                loc, quat, _ = local_pose.decompose()
                 prev_eul = prev_eulers[i]
                 if prev_eul is not None:
                     eul = quat.to_euler('XYZ', prev_eul)
@@ -267,7 +271,6 @@ def build_nad_from_action(
 
                 offset_t = loc - rest_translations[i]
                 trans_samples[i].append((float(offset_t.x), float(offset_t.y), float(offset_t.z)))
-                scale_samples[i].append((float(scl.x), float(scl.y), float(scl.z)))
     finally:
         armature_obj.data.pose_position = orig_pose_position
         if hasattr(anim_data, "use_nla"):
@@ -309,19 +312,6 @@ def build_nad_from_action(
             trans_track.keys = _compute_hermite_keys(nad_frames, trans_samples[i], use_smooth_tangents=use_smooth_tangents)
             trans_track.num_keys = len(trans_track.keys)
             nad.bone_tracks.append(trans_track)
-
-        # Track 2: Scale (only if non-unit scale exists)
-        has_scale = any(
-            abs(sx - 1.0) > 1e-3 or abs(sy - 1.0) > 1e-3 or abs(sz - 1.0) > 1e-3
-            for sx, sy, sz in scale_samples[i]
-        )
-        if has_scale:
-            scl_track = NadBoneTrack()
-            scl_track.bone_num = i
-            scl_track.track_type = NAD_TRACK_SCALE
-            scl_track.keys = _compute_hermite_keys(nad_frames, scale_samples[i], use_smooth_tangents=use_smooth_tangents)
-            scl_track.num_keys = len(scl_track.keys)
-            nad.bone_tracks.append(scl_track)
 
     nad.num_bone_tracks = len(nad.bone_tracks)
 

@@ -1,8 +1,39 @@
+import math
 import re
 from mathutils import Matrix, Vector
 from .vector4 import Vector4
 
 _BONE_INDEX_RE = re.compile(r"^Bone_(\d+)$")
+
+
+def rigid_export_matrix(matrix, label, *, allow_uniform_scale=False):
+    """Keep world-space positions, baking uniform bind scale out of the basis.
+
+    Redemption evaluates rotation and translation only. A scaled inverse bind
+    would therefore shrink the model when the engine ignores NAD scale tracks.
+    """
+    location, rotation, scale = matrix.decompose()
+    values = tuple(scale)
+    if not all(math.isfinite(v) for row in matrix for v in row):
+        raise ValueError(f"{label}: transform contains non-finite values")
+    if min(values) <= 1e-8 or matrix.to_3x3().determinant() <= 0:
+        raise ValueError(f"{label}: zero or mirrored skeleton scale is not supported")
+    tolerance = 1e-4 * max(values)
+    if max(values) - min(values) > tolerance:
+        raise ValueError(f"{label}: non-uniform skeleton scale is not supported; bake it before export")
+    rebuilt = Matrix.LocRotScale(location, rotation, scale)
+    if any(abs(matrix[r][c] - rebuilt[r][c]) > tolerance
+           for r in range(3) for c in range(3)):
+        raise ValueError(f"{label}: skeleton shear is not supported; bake it before export")
+    if not allow_uniform_scale and any(abs(v - 1.0) > 1e-3 for v in values):
+        raise ValueError(
+            f"{label}: animated bone/object scale is not supported by Redemption; "
+            "bake the animation without scaling before export"
+        )
+    # Preserve imported unit-scale matrices exactly (original NAD compatibility).
+    if all(abs(v - 1.0) < 1e-6 for v in values):
+        return matrix.copy()
+    return Matrix.LocRotScale(location, rotation, Vector((1.0, 1.0, 1.0)))
 
 
 def order_blender_bones(armature_obj):

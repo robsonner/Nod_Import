@@ -19,11 +19,11 @@ Blender 5.2+ extension and add-on for importing and exporting 3D models and skel
 ### (a) Installing from Extension ZIP
 1. In Blender, navigate to **Edit > Preferences > Get Extensions**.
 2. Click the menu dropdown in the top-right corner and select **Install from Disk...**.
-3. Choose `nod_import-1.0.1.zip` (located in the `dist/` directory).
+3. Choose `nod_import-1.0.2.zip` (located in the `dist/` directory).
 
 Alternatively, install via the Blender command-line interface:
 ```powershell
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --command extension install-file -r user_default -e dist\nod_import-1.0.1.zip
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --command extension install-file -r user_default -e dist\nod_import-1.0.2.zip
 ```
 
 ### (b) Building the Extension ZIP from Source
@@ -59,6 +59,16 @@ The importer exposes the following settings when importing a `.nod` model:
 
 ## Export Options
 
+Version 1.0.2 bakes constant positive uniform skeleton object scale (including
+Delta Scale and parent transforms) into scale-free bind matrices and bone
+positions. NAD translation and rotation are sampled in the same world space.
+The source Blender scene is not modified. Re-export both the NOD and all NAD
+files when replacing exports from older versions; old and new binds must not
+be mixed. No NAD scale tracks are written, because Redemption does not support
+them. Animated scaling, non-uniform skeleton scaling, mirrored transforms and
+shear produce an export error instead of silently producing an incompatible
+animation. Ordinary mesh transforms remain supported.
+
 Access the unified exporter from **File > Export > Nod Export (.nod, .nad)**. Switch between **Model (`.nod`)** and **Animation (`.nad`)** using the format toggle at the top of the export panel (or by typing `.nod` / `.nad` in the file name):
 
 ### Model (`.nod`)
@@ -80,6 +90,13 @@ python -m pytest tests -q
 ```
 
 ### Running Blender Headless Smoke Test
+
+Scale regression tests (optionally append `-- path\to\source.blend` to check
+every source Action against rotation/translation-only engine skinning):
+
+```powershell
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup --python-exit-code 1 --python tests\blender_scale_regression.py
+```
 Run the end-to-end headless integration smoke test with Blender 5.2:
 ```powershell
 & "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup --python-exit-code 1 --python tests\blender_smoke_test.py
